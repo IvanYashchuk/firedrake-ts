@@ -1,2 +1,2 @@
-# firedrake-ts
+# firedrake-ts &middot; [![Build](https://github.com/ivanyashchuk/firedrake-ts/workflows/CI/badge.svg)](https://github.com/ivanyashchuk/firedrake-ts/actions?query=workflow%3ACI+branch%3Amaster) [![Coverage Status](https://coveralls.io/repos/github/IvanYashchuk/firedrake-ts/badge.svg?branch=master)](https://coveralls.io/github/IvanYashchuk/firedrake-ts?branch=master)
 The FiredrakeTS library provides an interface to PETSc TS for the scalable solution of DAEs arising from the discretization of time-dependent PDEs.
