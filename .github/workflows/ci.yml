@@ -49,5 +49,5 @@ jobs:
         run: |
           source /home/firedrake/firedrake/bin/activate
           python -c "import sys; print('\n'.join(sys.path))"
-          python -m pytest --cov=firedrake_ts tests/
+          python -m pytest --cov=. --cov-config=tests/.coveragerc tests/
           coveralls

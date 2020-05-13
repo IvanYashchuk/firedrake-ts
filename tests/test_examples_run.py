@@ -7,7 +7,7 @@ import sys
 
 
 cwd = abspath(dirname(__file__))
-examples_dir = join(cwd, "..", "..", "examples")
+examples_dir = join(cwd, "..", "examples")
 
 
 # Discover the examples files by globbing the examples directory
