@@ -2,12 +2,12 @@ import firedrake_ts
 from firedrake import *
 
 mesh = UnitIntervalMesh(10)
-V = FunctionSpace(mesh, 'P', 1)
+V = FunctionSpace(mesh, "P", 1)
 
 u = Function(V)
 u_t = Function(V)
 v = TestFunction(V)
-F = inner(u_t, v)*dx + inner(grad(u), grad(v))*dx - 1.0*v*dx
+F = inner(u_t, v) * dx + inner(grad(u), grad(v)) * dx - 1.0 * v * dx
 
 bc = DirichletBC(V, 0.0, "on_boundary")
 

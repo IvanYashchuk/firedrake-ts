@@ -12,36 +12,57 @@ from firedrake.bcs import DirichletBC
 
 from firedrake_ts.solving_utils import check_ts_convergence, _TSContext
 
+
 def check_pde_args(F, J, Jp):
     if not isinstance(F, (ufl.Form, slate.TensorBase)):
-        raise TypeError("Provided residual is a '%s', not a Form or Slate Tensor" % type(F).__name__)
+        raise TypeError(
+            "Provided residual is a '%s', not a Form or Slate Tensor" % type(F).__name__
+        )
     if len(F.arguments()) != 1:
         raise ValueError("Provided residual is not a linear form")
     if not isinstance(J, (ufl.Form, slate.TensorBase)):
-        raise TypeError("Provided Jacobian is a '%s', not a Form or Slate Tensor" % type(J).__name__)
+        raise TypeError(
+            "Provided Jacobian is a '%s', not a Form or Slate Tensor" % type(J).__name__
+        )
     if len(J.arguments()) != 2:
         raise ValueError("Provided Jacobian is not a bilinear form")
     if Jp is not None and not isinstance(Jp, (ufl.Form, slate.TensorBase)):
-        raise TypeError("Provided preconditioner is a '%s', not a Form or Slate Tensor" % type(Jp).__name__)
+        raise TypeError(
+            "Provided preconditioner is a '%s', not a Form or Slate Tensor"
+            % type(Jp).__name__
+        )
     if Jp is not None and len(Jp.arguments()) != 2:
         raise ValueError("Provided preconditioner is not a bilinear form")
 
+
 def is_form_consistent(is_linear, bcs):
     # Check form style consistency
-    if not (is_linear == all(bc.is_linear for bc in bcs if not isinstance(bc, DirichletBC))
-            or not is_linear == all(not bc.is_linear for bc in bcs if not isinstance(bc, DirichletBC))):
-        raise TypeError("Form style mismatch: some forms are given in 'F == 0' style, but others are given in 'A == b' style.")
+    if not (
+        is_linear == all(bc.is_linear for bc in bcs if not isinstance(bc, DirichletBC))
+        or not is_linear
+        == all(not bc.is_linear for bc in bcs if not isinstance(bc, DirichletBC))
+    ):
+        raise TypeError(
+            "Form style mismatch: some forms are given in 'F == 0' style, but others are given in 'A == b' style."
+        )
+
 
 class DAEProblem(object):
     r"""Nonlinear variational problem in DAE form F(t, u, udot; v) = 0."""
 
-    def __init__(self, F, u, udot, tspan,
-                 time=None,
-                 bcs=None,
-                 J=None,
-                 Jp=None,
-                 form_compiler_parameters=None,
-                 is_linear=False):
+    def __init__(
+        self,
+        F,
+        u,
+        udot,
+        tspan,
+        time=None,
+        bcs=None,
+        J=None,
+        Jp=None,
+        form_compiler_parameters=None,
+        is_linear=False,
+    ):
         r"""
         :param F: the nonlinear form
         :param u: the :class:`.Function` to solve for
@@ -73,9 +94,14 @@ class DAEProblem(object):
         self.F = F
         self.Jp = Jp
         if not isinstance(self.u, function.Function):
-            raise TypeError("Provided solution is a '%s', not a Function" % type(self.u).__name__)
+            raise TypeError(
+                "Provided solution is a '%s', not a Function" % type(self.u).__name__
+            )
         if not isinstance(self.udot, function.Function):
-            raise TypeError("Provided time derivative is a '%s', not a Function" % type(self.udot).__name__)
+            raise TypeError(
+                "Provided time derivative is a '%s', not a Function"
+                % type(self.udot).__name__
+            )
 
         # current value of time that may be used in weak form
         self.time = time or Constant(0.0)
@@ -84,7 +110,9 @@ class DAEProblem(object):
 
         # Use the user-provided Jacobian. If none is provided, derive
         # the Jacobian from the residual.
-        self.J = J or self.shift*ufl_expr.derivative(F, udot) + ufl_expr.derivative(F, u)
+        self.J = J or self.shift * ufl_expr.derivative(F, udot) + ufl_expr.derivative(
+            F, u
+        )
 
         # Argument checking
         check_pde_args(self.F, self.J, self.Jp)
@@ -174,13 +202,15 @@ class DAESolver(OptionsManager):
 
         appctx = kwargs.get("appctx")
 
-        ctx = _TSContext(problem,
-                        mat_type=mat_type,
-                        pmat_type=pmat_type,
-                        appctx=appctx,
-                        pre_jacobian_callback=pre_j_callback,
-                        pre_function_callback=pre_f_callback,
-                        options_prefix=self.options_prefix)
+        ctx = _TSContext(
+            problem,
+            mat_type=mat_type,
+            pmat_type=pmat_type,
+            appctx=appctx,
+            pre_jacobian_callback=pre_j_callback,
+            pre_function_callback=pre_f_callback,
+            options_prefix=self.options_prefix,
+        )
 
         # No preconditioner by default for matrix-free
         if (problem.Jp is not None and pmatfree) or matfree:
@@ -212,12 +242,24 @@ class DAESolver(OptionsManager):
 
         ctx.set_ifunction(self.ts)
         ctx.set_ijacobian(self.ts)
-        ctx.set_nullspace(nullspace, problem.J.arguments()[0].function_space()._ises,
-                          transpose=False, near=False)
-        ctx.set_nullspace(nullspace_T, problem.J.arguments()[1].function_space()._ises,
-                          transpose=True, near=False)
-        ctx.set_nullspace(near_nullspace, problem.J.arguments()[0].function_space()._ises,
-                          transpose=False, near=True)
+        ctx.set_nullspace(
+            nullspace,
+            problem.J.arguments()[0].function_space()._ises,
+            transpose=False,
+            near=False,
+        )
+        ctx.set_nullspace(
+            nullspace_T,
+            problem.J.arguments()[1].function_space()._ises,
+            transpose=True,
+            near=False,
+        )
+        ctx.set_nullspace(
+            near_nullspace,
+            problem.J.arguments()[0].function_space()._ises,
+            transpose=False,
+            near=True,
+        )
         ctx._nullspace = nullspace
         ctx._nullspace_T = nullspace_T
         ctx._near_nullspace = near_nullspace
@@ -268,8 +310,13 @@ class DAESolver(OptionsManager):
             with ExitStack() as stack:
                 # Ensure options database has full set of options (so monitors
                 # work right)
-                for ctx in chain((self.inserted_options(), dmhooks.add_hooks(dm, self, appctx=self._ctx)),
-                                 self._transfer_operators):
+                for ctx in chain(
+                    (
+                        self.inserted_options(),
+                        dmhooks.add_hooks(dm, self, appctx=self._ctx),
+                    ),
+                    self._transfer_operators,
+                ):
                     stack.enter_context(ctx)
                 self.ts.solve(work)
             work.copy(u)
