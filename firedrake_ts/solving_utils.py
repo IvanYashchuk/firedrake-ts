@@ -24,10 +24,7 @@ def check_ts_convergence(ts):
     reason = TSReasons[r]
     if r < 0:
         raise ConvergenceError(
-            r"""TS solve failed to converge after %d iterations.
-Reason:
-   %s"""
-            % (ts.getStepNumber(), reason)
+            f"TS solve failed to converge after {ts.getStepNumber()} iterations. Reason: {reason}"
         )
 
 
@@ -184,8 +181,6 @@ class _TSContext(object):
 
     def split(self, fields):
         from firedrake import replace, as_vector, split
-
-        # from firedrake import NonlinearVariationalProblem as NLVP
         from firedrake_ts.ts_solver import DAEProblem
         from firedrake.bcs import DirichletBC, EquationBC
 
@@ -377,6 +372,7 @@ class _TSContext(object):
         ctx = dmhooks.get_appctx(dm)
         problem = ctx._problem
         assert J.handle == ctx._jac.petscmat.handle
+        # TODO: Check how to use constant jacobian properly for TS
         if problem._constant_jacobian and ctx._jacobian_assembled:
             # Don't need to do any work with a constant jacobian
             # that's already assembled

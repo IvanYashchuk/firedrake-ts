@@ -16,20 +16,19 @@ from firedrake_ts.solving_utils import check_ts_convergence, _TSContext
 def check_pde_args(F, J, Jp):
     if not isinstance(F, (ufl.Form, slate.TensorBase)):
         raise TypeError(
-            "Provided residual is a '%s', not a Form or Slate Tensor" % type(F).__name__
+            f"Provided residual is a '{type(F).__name__}', not a Form or Slate Tensor"
         )
     if len(F.arguments()) != 1:
         raise ValueError("Provided residual is not a linear form")
     if not isinstance(J, (ufl.Form, slate.TensorBase)):
         raise TypeError(
-            "Provided Jacobian is a '%s', not a Form or Slate Tensor" % type(J).__name__
+            f"Provided Jacobian is a '{type(J).__name__}', not a Form or Slate Tensor"
         )
     if len(J.arguments()) != 2:
         raise ValueError("Provided Jacobian is not a bilinear form")
     if Jp is not None and not isinstance(Jp, (ufl.Form, slate.TensorBase)):
         raise TypeError(
-            "Provided preconditioner is a '%s', not a Form or Slate Tensor"
-            % type(Jp).__name__
+            f"Provided preconditioner is a '{type(Jp).__name__}', not a Form or Slate Tensor"
         )
     if Jp is not None and len(Jp.arguments()) != 2:
         raise ValueError("Provided preconditioner is not a bilinear form")
@@ -220,7 +219,6 @@ class DAESolver(OptionsManager):
             # one.
             self.set_default_parameter("pc_type", "jacobi")
 
-        # self.snes = PETSc.SNES().create(comm=problem.dm.comm)
         self.ts = PETSc.TS().create(comm=problem.dm.comm)
         self.snes = self.ts.getSNES()
 
@@ -235,7 +233,6 @@ class DAESolver(OptionsManager):
         self.ts.setTime(problem.tspan[0])
         self.ts.setMaxTime(problem.tspan[1])
         self.ts.setEquationType(PETSc.TS.EquationType.IMPLICIT)
-        # self.ts.setExactFinalTime(PETSc.TS.ExactFinalTime.INTERPOLATE)
         self.set_default_parameter("ts_exact_final_time", "interpolate")
         # allow a certain number of failures (step will be rejected and retried)
         self.set_default_parameter("ts_max_snes_failures", 5)
@@ -264,8 +261,7 @@ class DAESolver(OptionsManager):
         ctx._nullspace_T = nullspace_T
         ctx._near_nullspace = near_nullspace
 
-        # Set from options now, so that people who want to noodle with
-        # the snes object directly (mostly Patrick), can.  We need the
+        # Set from options now. We need the
         # DM with an app context in place so that if the DM is active
         # on a subKSP the context is available.
         dm = self.ts.getDM()
