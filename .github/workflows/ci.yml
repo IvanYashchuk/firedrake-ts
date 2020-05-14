@@ -51,3 +51,4 @@ jobs:
           python -c "import sys; print('\n'.join(sys.path))"
           python -m pytest --cov=firedrake_ts --cov-config=tests/.coveragerc tests/
           coveralls
+          bash <(curl -s https://codecov.io/bash)
