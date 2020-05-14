@@ -233,7 +233,7 @@ class DAESolver(OptionsManager):
         self.ts.setTime(problem.tspan[0])
         self.ts.setMaxTime(problem.tspan[1])
         self.ts.setEquationType(PETSc.TS.EquationType.IMPLICIT)
-        self.set_default_parameter("ts_exact_final_time", "interpolate")
+        self.set_default_parameter("ts_exact_final_time", "stepover")
         # allow a certain number of failures (step will be rejected and retried)
         self.set_default_parameter("ts_max_snes_failures", 5)
 
