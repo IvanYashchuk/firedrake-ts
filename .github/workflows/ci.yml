@@ -40,7 +40,7 @@ jobs:
         shell: bash -l {0}
         run: |
           source /home/firedrake/firedrake/bin/activate
-          python -m pip install .
+          python -m pip install -e .
 
       - name: Test with pytest
         shell: bash -l {0}
@@ -49,5 +49,5 @@ jobs:
         run: |
           source /home/firedrake/firedrake/bin/activate
           python -c "import sys; print('\n'.join(sys.path))"
-          python -m pytest --cov=. --cov-config=tests/.coveragerc tests/
+          python -m pytest --cov=firedrake_ts --cov-config=tests/.coveragerc tests/
           coveralls
