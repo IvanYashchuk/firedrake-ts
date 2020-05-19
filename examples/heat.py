@@ -17,7 +17,7 @@ bump = conditional(lt(abs(x[0] - 0.5), 0.1), 1.0, 0.0)
 u.interpolate(bump)
 
 problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 1.0), bcs=bc)
-solver = firedrake_ts.DAESolver(problem)
+solver = firedrake_ts.DAESolver(problem, solver_parameters={"mat_type": "matfree"})
 
 solver.solve()
 
