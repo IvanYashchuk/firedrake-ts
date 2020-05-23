@@ -7,7 +7,7 @@ from firedrake import dmhooks
 import ufl
 import firedrake_ts
 
-equation = "heat"  # 'burgers' or 'heat'
+equation = "burgers"  # 'burgers' or 'heat'
 n = 50
 mesh = fd.UnitSquareMesh(n, n)
 V = fd.VectorFunctionSpace(mesh, "CG", 2)
@@ -50,6 +50,9 @@ ts.setTimeStep(0.01)
 ts.setExactFinalTime(PETSc.TS.ExactFinalTime.MATCHSTEP)
 ts.setSaveTrajectory()
 
+ts.setType(PETSc.TS.Type.THETA)
+ts.setTheta(0.99)  # adjoint for 1.0 (backward Euler) is currently broken in PETSc
+
 solver.solve()
 
 J = fd.inner(u, u) * fd.dx
@@ -67,18 +70,12 @@ print(f"Norm of dJdu before the adjoint solve: {fd.norm(dJdu)}")
 # u is the solution state
 # m is the parameter
 # then the input is dJdu (at final time), dJdm (at final time)
-# After calling ts.adjointSolve() these Vecs will be overwritten by results
+# After calling solver.adjoint_solve() these Vecs will be overwritten by results
 ts.setCostGradients(dJdu_vec, None)
 
+solver.adjoint_solve()
+
+print(f"Norm of dJdu after the adjoint solve: {fd.norm(dJdu)}")
+
 adj_out = fd.File("result/adj.pvd")
-
-
-dm = ts.getDM()
-with dmhooks.add_hooks(dm, solver, appctx=solver._ctx):
-    # ts.adjointSolve() # "works" only if one timestep was done during the forward run
-    ts.adjointStep()  # the first adjoint step seems to work correctly
-    print(f"Norm of dJdu, adjoint step #1: {fd.norm(dJdu)}")
-    adj_out.write(dJdu, time=0)
-    ts.adjointStep()  # trying to call adjointStep second time breaks the calculation
-    print(f"Norm of dJdu, adjoint step #2: {fd.norm(dJdu)}")
-    adj_out.write(dJdu, time=1)
+adj_out.write(dJdu, time=0)
