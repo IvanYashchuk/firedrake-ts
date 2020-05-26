@@ -333,3 +333,22 @@ class DAESolver(OptionsManager):
             work.copy(u)
         self._setup = True
         check_ts_convergence(self.ts)
+
+    def adjoint_solve(self):
+        r"""Solve the adjoint problem.
+        """
+        # Make sure appcontext is attached to the DM before the adjoint solve.
+        dm = self.ts.getDM()
+
+        with ExitStack() as stack:
+            for ctx in chain(
+                (
+                    self.inserted_options(),
+                    dmhooks.add_hooks(dm, self, appctx=self._ctx),
+                ),
+                self._transfer_operators,
+            ):
+                stack.enter_context(ctx)
+            self.ts.adjointSolve()
+
+        check_ts_convergence(self.ts)
