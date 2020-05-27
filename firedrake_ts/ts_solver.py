@@ -35,11 +35,11 @@ def check_pde_args(F, J, Jp, M):
     if Jp is not None and len(Jp.arguments()) != 2:
         raise ValueError("Provided preconditioner is not a bilinear form")
 
-    if not isinstance(M, ufl.Form):
+    if M is not None and not isinstance(M, ufl.Form):
         raise TypeError(
             "Provided Functional M is a '%s', not a ufl.Form" % type(M).__name__
         )
-    if M.arguments():
+    if M is not None and M.arguments():
         raise ValueError(
             "Provided Functional M is contains a TestFunction or a TrialFunction"
         )
@@ -127,6 +127,9 @@ class DAEProblem(object):
         self.J = J or self.shift * ufl_expr.derivative(F, udot) + ufl_expr.derivative(
             F, u
         )
+
+        # Obtain the jacobian of the goal function w.r.t. solution
+        self.dMdu = ufl_expr.derivative(M, u)
 
         # Argument checking
         check_pde_args(self.F, self.J, self.Jp, self.M)
