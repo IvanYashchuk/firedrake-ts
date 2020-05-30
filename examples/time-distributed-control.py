@@ -33,7 +33,16 @@ problem = firedrake_ts.DAEProblem(F, u, u_t, (0, T), bcs=bc, time=t)
 solver = firedrake_ts.DAESolver(problem)
 
 ts = solver.ts
-quad_ts = ts.createQuadratureTS()
+
+ts.setExactFinalTime(PETSc.TS.ExactFinalTime.MATCHSTEP)
+ts.setSaveTrajectory()
+
+ts.setType(PETSc.TS.Type.THETA)
+ts.setTheta(0.99)  # adjoint for 1.0 (backward Euler) is currently broken in PETSc
+ts.setTimeStep(0.1)
+
+quad_ts = ts.createQuadratureTS(forward=False)
+quad_ts.setDM(problem.dm)
 
 R = fd.FunctionSpace(mesh, "R", 0)
 vr = fd.TestFunction(R)
@@ -62,7 +71,7 @@ def form_cost_integrand(ts, t, X, R):
 
     fd.assemble(j, tensor=j_value)
     with j_value.dat.vec_ro as v:
-        v.copy(F)
+        v.copy(R)
 
 
 _djdu = fd.assemble(fd.derivative(j, u))
@@ -93,8 +102,9 @@ def form_djdf(ts, t, X, Amat):
 
 # integrand_vec = PETSc.Vec().createSeq(1)
 
-with j_value.dat.vec_wo as v:
-    quad_ts.setRHSFunction(form_cost_integrand, f=v)
+# with j_value.dat.vec_wo as v:
+#     quad_ts.setRHSFunction(form_cost_integrand, f=v)
+quad_ts.setRHSFunction(form_cost_integrand)
 
 # # djdu_mat = PETSc.Mat().createDense([1, u.ufl_function_space().dim()])
 # quad_ts.setRHSJacobian(form_djdu, J=_djdu.petscmat)
@@ -102,19 +112,24 @@ with j_value.dat.vec_wo as v:
 # # djdf_mat = PETSc.Mat().createDense([1, f.ufl_function_space().dim()])
 # quad_ts.setRHSJacobianP(form_djdf, A=_djdf.petscmat)
 
-ts.setExactFinalTime(PETSc.TS.ExactFinalTime.MATCHSTEP)
-ts.setSaveTrajectory()
-
-ts.setType(PETSc.TS.Type.THETA)
-ts.setTheta(0.99)  # adjoint for 1.0 (backward Euler) is currently broken in PETSc
-ts.setTimeStep(0.1)
-
 bump = ufl.conditional(ufl.lt(abs(x[0] - 0.5), 0.1), 1.0, 0.0)
 u.interpolate(bump)
 
-# I get the error at this point
-# Assertion failed: (!PyErr_Occurred()), function __Pyx_PyCFunction_FastCall, file src/petsc4py.PETSc.c, line 339679.
-# Abort trap: 6
+# I get error at this point
+# Error: error code 75
+# [0] TSSolve() line 4127 in /Users/yashchi1/devdir/firedrake/src/petsc/src/ts/interface/ts.c
+# [0] TSStep() line 3721 in /Users/yashchi1/devdir/firedrake/src/petsc/src/ts/interface/ts.c
+# [0] TSStep_Theta() line 223 in /Users/yashchi1/devdir/firedrake/src/petsc/src/ts/impls/implicit/theta/theta.c
+# [0] TSTheta_SNESSolve() line 185 in /Users/yashchi1/devdir/firedrake/src/petsc/src/ts/impls/implicit/theta/theta.c
+# [0] SNESSolve() line 4516 in /Users/yashchi1/devdir/firedrake/src/petsc/src/snes/interface/snes.c
+# [0] SNESSolve_NEWTONLS() line 175 in /Users/yashchi1/devdir/firedrake/src/petsc/src/snes/impls/ls/ls.c
+# [0] SNESComputeFunction() line 2379 in /Users/yashchi1/devdir/firedrake/src/petsc/src/snes/interface/snes.c
+# [0] SNESTSFormFunction() line 4983 in /Users/yashchi1/devdir/firedrake/src/petsc/src/ts/interface/ts.c
+# [0] SNESTSFormFunction_Theta() line 973 in /Users/yashchi1/devdir/firedrake/src/petsc/src/ts/impls/implicit/theta/theta.c
+# [0] VecAXPBYPCZ() line 684 in /Users/yashchi1/devdir/firedrake/src/petsc/src/vec/vec/interface/rvector.c
+# [0] Arguments are incompatible
+# [0] Incompatible vector global lengths parameter # 1 global size 1 != parameter # 5 global size 81
+
 solver.solve()
 
 dJdu = fd.Function(V)
