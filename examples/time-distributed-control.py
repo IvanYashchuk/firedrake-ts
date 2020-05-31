@@ -4,7 +4,6 @@
 import firedrake as fd
 from firedrake.petsc import PETSc
 from firedrake import dmhooks
-from firedrake.assemble import create_assembly_callable
 import ufl
 import firedrake_ts
 
@@ -41,16 +40,17 @@ ts.setType(PETSc.TS.Type.THETA)
 ts.setTheta(0.99)  # adjoint for 1.0 (backward Euler) is currently broken in PETSc
 ts.setTimeStep(0.1)
 
-quad_ts = ts.createQuadratureTS(forward=False)
-quad_ts.setDM(problem.dm)
+# Now create QuadratureTS for integrating the cost integral
+quad_ts = ts.createQuadratureTS(forward=True)
 
-R = fd.FunctionSpace(mesh, "R", 0)
-vr = fd.TestFunction(R)
+# We want to attach solver._ctx to DM of QuadratureTS
+# to be able to modify the data attached to the solver
+# from the RHSFunction, Jacobian, JacobianP
+quad_dm = quad_ts.getDM()
+dmhooks.push_appctx(quad_dm, solver._ctx)
 
 # how to include time derivative of f?
-j = ((u - data) ** 2 + t * f) * vr * dx
-
-j_value = fd.Function(R)
+j = ((u - data) ** 2 + t * f) * dx
 
 
 def form_cost_integrand(ts, t, X, R):
@@ -69,12 +69,13 @@ def form_cost_integrand(ts, t, X, R):
         X.copy(v)
     ctx._time.assign(t)
 
-    fd.assemble(j, tensor=j_value)
-    with j_value.dat.vec_ro as v:
-        v.copy(R)
+    j_value = fd.assemble(j)
+    R.set(j_value)
 
 
 _djdu = fd.assemble(fd.derivative(j, u))
+djdu_transposed_mat = PETSc.Mat().createDense([_djdu.ufl_function_space().dim(), 1])
+djdu_transposed_mat.setUp()
 
 
 def form_djdu(ts, t, X, Amat, Pmat):
@@ -85,9 +86,18 @@ def form_djdu(ts, t, X, Amat, Pmat):
     ctx._time.assign(t)
 
     fd.assemble(fd.derivative(j, u), tensor=_djdu)
+    Amat_array = Amat.getDenseArray()
+    Amat_array[:] = _djdu.dat.data.reshape(Amat_array.shape)
+
+    # the following is wrong in parallel, since getValues can only get values on the same processor
+    # with _djdu.dat.vec_ro as v:
+    #     Amat_array[:] = v.getValues(range(*Amat.getOwnershipRange())).reshape(Amat_array.shape)
+    # Amat.assemble()
 
 
 _djdf = fd.assemble(fd.derivative(j, f))
+djdf_transposed_mat = PETSc.Mat().createDense([_djdf.ufl_function_space().dim(), 1])
+djdf_transposed_mat.setUp()
 
 
 def form_djdf(ts, t, X, Amat):
@@ -98,42 +108,38 @@ def form_djdf(ts, t, X, Amat):
     ctx._time.assign(t)
 
     fd.assemble(fd.derivative(j, f), tensor=_djdf)
+    Amat_array = Amat.getDenseArray()
+    Amat_array[:] = _djdf.dat.data.reshape(Amat_array.shape)
+
+    # the following is wrong in parallel, since getValues can only get values on the same processor
+    # with _djdf.dat.vec_ro as v:
+    #     Amat_array[:] = v.getValues(getValues(range(*Amat.getOwnershipRange()))).reshape(Amat_array.shape)
+    # Amat.assemble()
 
 
-# integrand_vec = PETSc.Vec().createSeq(1)
-
-# with j_value.dat.vec_wo as v:
-#     quad_ts.setRHSFunction(form_cost_integrand, f=v)
 quad_ts.setRHSFunction(form_cost_integrand)
-
-# # djdu_mat = PETSc.Mat().createDense([1, u.ufl_function_space().dim()])
-# quad_ts.setRHSJacobian(form_djdu, J=_djdu.petscmat)
-
-# # djdf_mat = PETSc.Mat().createDense([1, f.ufl_function_space().dim()])
-# quad_ts.setRHSJacobianP(form_djdf, A=_djdf.petscmat)
+quad_ts.setRHSJacobian(form_djdu, J=djdu_transposed_mat)
+quad_ts.setRHSJacobianP(form_djdf, A=djdf_transposed_mat)
 
 bump = ufl.conditional(ufl.lt(abs(x[0] - 0.5), 0.1), 1.0, 0.0)
 u.interpolate(bump)
 
-# I get error at this point
-# Error: error code 75
-# [0] TSSolve() line 4127 in /Users/yashchi1/devdir/firedrake/src/petsc/src/ts/interface/ts.c
-# [0] TSStep() line 3721 in /Users/yashchi1/devdir/firedrake/src/petsc/src/ts/interface/ts.c
-# [0] TSStep_Theta() line 223 in /Users/yashchi1/devdir/firedrake/src/petsc/src/ts/impls/implicit/theta/theta.c
-# [0] TSTheta_SNESSolve() line 185 in /Users/yashchi1/devdir/firedrake/src/petsc/src/ts/impls/implicit/theta/theta.c
-# [0] SNESSolve() line 4516 in /Users/yashchi1/devdir/firedrake/src/petsc/src/snes/interface/snes.c
-# [0] SNESSolve_NEWTONLS() line 175 in /Users/yashchi1/devdir/firedrake/src/petsc/src/snes/impls/ls/ls.c
-# [0] SNESComputeFunction() line 2379 in /Users/yashchi1/devdir/firedrake/src/petsc/src/snes/interface/snes.c
-# [0] SNESTSFormFunction() line 4983 in /Users/yashchi1/devdir/firedrake/src/petsc/src/ts/interface/ts.c
-# [0] SNESTSFormFunction_Theta() line 973 in /Users/yashchi1/devdir/firedrake/src/petsc/src/ts/impls/implicit/theta/theta.c
-# [0] VecAXPBYPCZ() line 684 in /Users/yashchi1/devdir/firedrake/src/petsc/src/vec/vec/interface/rvector.c
-# [0] Arguments are incompatible
-# [0] Incompatible vector global lengths parameter # 1 global size 1 != parameter # 5 global size 81
-
 solver.solve()
+
+PETSc.Sys.Print(f"Cost integral value is {ts.getCostIntegral().getArray()}")
 
 dJdu = fd.Function(V)
 dJdf = fd.Function(V)
 
+# TODO: Add wrappers of TSSetIJacobianP to petsc4py
+# AttributeError: 'petsc4py.PETSc.TS' object has no attribute 'setIJacobianP'
+
 with dJdu.dat.vec as dJdu_vec, dJdf.dat.vec as dJdf_vec:
-    ts.setCostGradients(dJdu_vec, dJdf_vec)
+    ts.setCostGradients(dJdu_vec, None)
+
+PETSc.Sys.Print(f"Norm before the adjoint solve: {fd.norm(dJdu)}")
+
+solver.adjoint_solve()
+
+# Something happens
+PETSc.Sys.Print(f"Norm after the adjoint solve: {fd.norm(dJdu)}")
