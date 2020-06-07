@@ -13,7 +13,7 @@ from firedrake.bcs import DirichletBC
 from firedrake_ts.solving_utils import check_ts_convergence, _TSContext
 
 
-def check_pde_args(F, J, Jp):
+def check_pde_args(F, J, Jp, M):
     if not isinstance(F, (ufl.Form, slate.TensorBase)):
         raise TypeError(
             f"Provided residual is a '{type(F).__name__}', not a Form or Slate Tensor"
@@ -26,12 +26,23 @@ def check_pde_args(F, J, Jp):
         )
     if len(J.arguments()) != 2:
         raise ValueError("Provided Jacobian is not a bilinear form")
+
     if Jp is not None and not isinstance(Jp, (ufl.Form, slate.TensorBase)):
         raise TypeError(
             f"Provided preconditioner is a '{type(Jp).__name__}', not a Form or Slate Tensor"
         )
+
     if Jp is not None and len(Jp.arguments()) != 2:
         raise ValueError("Provided preconditioner is not a bilinear form")
+
+    if M is not None and not isinstance(M, ufl.Form):
+        raise TypeError(
+            "Provided Functional M is a '%s', not a ufl.Form" % type(M).__name__
+        )
+    if M is not None and M.arguments():
+        raise ValueError(
+            "Provided Functional M is contains a TestFunction or a TrialFunction"
+        )
 
 
 def is_form_consistent(is_linear, bcs):
@@ -61,6 +72,7 @@ class DAEProblem(object):
         Jp=None,
         form_compiler_parameters=None,
         is_linear=False,
+        M=None,
     ):
         r"""
         :param F: the nonlinear form
@@ -77,6 +89,8 @@ class DAEProblem(object):
             compiler (optional)
         :is_linear: internally used to check if all domain/bc forms
             are given either in 'A == b' style or in 'F == 0' style.
+        :param M: Functional which employs the TS solution and used by TSAdjoint
+                in the derivative calculation
         """
         from firedrake import solving
         from firedrake import function, Constant
@@ -92,6 +106,7 @@ class DAEProblem(object):
         self.tspan = tspan
         self.F = F
         self.Jp = Jp
+        self.M = M
         if not isinstance(self.u, function.Function):
             raise TypeError(
                 "Provided solution is a '%s', not a Function" % type(self.u).__name__
@@ -113,8 +128,11 @@ class DAEProblem(object):
             F, u
         )
 
+        # Obtain the jacobian of the goal function w.r.t. solution
+        self.dMdu = ufl_expr.derivative(M, u)
+
         # Argument checking
-        check_pde_args(self.F, self.J, self.Jp)
+        check_pde_args(self.F, self.J, self.Jp, self.M)
 
         # Store form compiler parameters
         self.form_compiler_parameters = form_compiler_parameters
