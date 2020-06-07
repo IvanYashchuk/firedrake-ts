@@ -121,6 +121,10 @@ class _TSContext(object):
         self.F = problem.F
         self.J = problem.J
 
+        if problem.M:
+            self.M = problem.M
+            self.p = problem.p
+
         # For Jp to equal J, bc.Jp must equal bc.J for all EquationBC objects.
         Jp_eq_J = problem.Jp is None and all(bc.Jp_eq_J for bc in problem.bcs)
 
@@ -180,6 +184,27 @@ class _TSContext(object):
     def set_ijacobian(self, ts):
         r"""Set the function to compute the matrix dF/dU + a*dF/dU_t where F(t,U,U_t) is the function provided with set_ifunction()"""
         ts.setIJacobian(self.form_jacobian, J=self._jac.petscmat, P=self._pjac.petscmat)
+
+    def set_quad_rhsfunction(self, ts):
+        r"""Set the function to compute the cost function integrand"""
+        ts.setRHSFunction(self.form_cost_integrand)
+
+    def set_quad_rhsjacobian(self, ts):
+        r"""Set the function to compute the cost function integrand jacobian w.r.t U"""
+        ts.setRHSJacobian(self.form_cost_jacobian, J=self._Mjac_x)
+
+    def set_quad_rhsjacobianP(self, ts):
+        r"""Set the function to compute the cost function integrand jacobian w.r.t p"""
+        ts.setRHSJacobian(self.form_cost_jacobianP, J=self._Mjac_p)
+
+    def set_rhsjacobianP(self, ts):
+        r"""Set the function to compute the residual RHS jacobian w.r.t p"""
+        ts.setRHSJacobianP(self.form_rhs_jacobianP, self._dFdp.petscmat)
+
+    def set_cost_gradients(self, ts):
+        r"""Set the function to compute the residual RHS jacobian w.r.t p"""
+        with self._dMdx.dat.vec as dMdu_vec, self._dMdp.dat.vec as dMdp_vec:
+            ts.setCostGradients(dMdu_vec, dMdp_vec)
 
     def set_nullspace(self, nullspace, ises=None, transpose=False, near=False):
         if nullspace is None:
@@ -370,6 +395,104 @@ class _TSContext(object):
         ctx.set_nullspace(ctx._near_nullspace, ises, transpose=False, near=True)
 
     @staticmethod
+    def form_cost_integrand(ts, t, X, R):
+        r"""Form the integrand of the nost function
+
+        :arg ts: a PETSc TS object
+        :arg t: the time at step/stage being solved
+        :arg X: state vector
+        :arg R: function vector
+        """
+        from firedrake.assemble import assemble
+
+        dm = ts.getDM()
+        ctx = dmhooks.get_appctx(dm)
+        # X may not be the same vector as the vec behind self._x, so
+        # copy guess in from X.
+        with ctx._x.dat.vec_wo as v:
+            X.copy(v)
+        ctx._time.assign(t)
+
+        j_value = assemble(ctx.M)
+        R.set(j_value)
+
+    @staticmethod
+    def form_cost_jacobian(ts, t, X, J, P):
+        r"""Form the jacobian of the nost function
+
+        :arg ts: a PETSc TS object
+        :arg t: the time at step/stage being solved
+        :arg X: state vector
+        :arg J: the Jacobian (a Mat)
+        :arg P: the preconditioner matrix (a Mat)
+        """
+        from firedrake.assemble import assemble
+        from firedrake import derivative
+
+        dm = ts.getDM()
+        ctx = dmhooks.get_appctx(dm)
+        # X may not be the same vector as the vec behind self._x, so
+        # copy guess in from X.
+        with ctx._x.dat.vec_wo as v:
+            X.copy(v)
+        ctx._time.assign(t)
+
+        assemble(derivative(ctx.M, ctx._x), tensor=ctx._Mjac_x_vec)
+        Jmat_array = J.getDenseArray()
+        with ctx._Mjac_x_vec.dat.vec_ro as v:
+            Jmat_array[:, 0] = v.array[:]
+        J.assemble()
+
+    @staticmethod
+    def form_cost_jacobianP(ts, t, X, J, P):
+        r"""Form the jacobian of the cost function w.r.t. p (not P the preconditioner)
+
+        :arg ts: a PETSc TS object
+        :arg t: the time at step/stage being solved
+        :arg X: state vector
+        :arg J: the Jacobian (a Mat)
+        :arg P: the preconditioner matrix (a Mat)
+        """
+        from firedrake.assemble import assemble
+        from firedrake import derivative
+
+        dm = ts.getDM()
+        ctx = dmhooks.get_appctx(dm)
+        # X may not be the same vector as the vec behind self._x, so
+        # copy guess in from X.
+        with ctx._x.dat.vec_wo as v:
+            X.copy(v)
+        ctx._time.assign(t)
+
+        assemble(derivative(ctx.M, ctx.p), tensor=ctx._Mjac_p_vec)
+        Jmat_array = J.getDenseArray()
+        with ctx._Mjac_p_vec.dat.vec_ro as v:
+            Jmat_array[:, 0] = v.array[:]
+        J.assemble()
+
+    @staticmethod
+    def form_rhs_jacobianP(ts, t, X, J):
+        r"""Form the jacobian of the RHS function w.r.t. p (not P the preconditioner)
+        :arg ts: a PETSc TS object
+        :arg t: the time at step/stage being solved
+        :arg X: state vector
+        :arg J: the Jacobian (a Mat)
+        :arg P: the preconditioner matrix (a Mat)
+        """
+        from firedrake.assemble import assemble
+        from firedrake import derivative
+
+        dm = ts.getDM()
+        ctx = dmhooks.get_appctx(dm)
+        ctx._time.assign(t)
+        with ctx._x.dat.vec_wo as v:
+            X.copy(v)
+
+        dFdp = derivative(-ctx.F, ctx.p)
+
+        assemble(dFdp, tensor=ctx._dFdp)
+
+    @staticmethod
     def compute_operators(ksp, J, P):
         r"""Form the Jacobian for this problem
 
@@ -428,6 +551,61 @@ class _TSContext(object):
             form_compiler_parameters=self.fcp,
             mat_type=self.mat_type,
         )
+
+    # The jacobian of the cost function has to be a dense matrix per PETSc requirements,
+    # but Firedrake is not able to assemble the liner form resulting from derivative(M, u)
+    # into a dense matrix, only into a vector (not even augmenting the 0-form with Real space)
+    # We decide to have two copies of the same information. One Firedrake vector to assemble
+    # the linear form into (_Mjac_x_vec) and a dense matrix to pass the information to PETSc
+    # We do the same for the jacobian w.r.t. the control
+    @cached_property
+    def _Mjac_x_vec(self):
+        return function.Function(self.F.arguments()[0].function_space())
+
+    @cached_property
+    def _Mjac_x(self):
+        from firedrake import derivative
+        from firedrake.assemble import assemble
+
+        local_dofs = self._Mjac_x_vec.dat.data.shape[0]
+        djdu_transposed_mat = PETSc.Mat().createDense(
+            [[local_dofs, self._Mjac_x_vec.ufl_function_space().dim()], [1, 1]]
+        )
+        djdu_transposed_mat.setUp()
+
+        return djdu_transposed_mat
+
+    @cached_property
+    def _Mjac_p_vec(self):
+        return function.Function(self.p.function_space())
+
+    @cached_property
+    def _Mjac_p(self):
+        from firedrake import derivative
+        from firedrake.assemble import assemble
+
+        local_dofs = self._Mjac_p_vec.dat.data.shape[0]
+        djdp_transposed_mat = PETSc.Mat().createDense(
+            [[local_dofs, self._Mjac_p_vec.ufl_function_space().dim()], [1, 1]]
+        )
+        djdp_transposed_mat.setUp()
+
+        return djdp_transposed_mat
+
+    @cached_property
+    def _dFdp(self):
+        from firedrake import derivative
+        from firedrake.assemble import assemble
+
+        return assemble(derivative(-self.F, self.p))
+
+    @cached_property
+    def _dMdx(self):
+        return function.Function(self.F.arguments()[0].function_space())
+
+    @cached_property
+    def _dMdp(self):
+        return function.Function(self.p.function_space())
 
     @cached_property
     def is_mixed(self):

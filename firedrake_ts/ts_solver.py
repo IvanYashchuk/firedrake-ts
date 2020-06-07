@@ -13,7 +13,7 @@ from firedrake.bcs import DirichletBC
 from firedrake_ts.solving_utils import check_ts_convergence, _TSContext
 
 
-def check_pde_args(F, J, Jp, M):
+def check_forms(F, J, Jp, M):
     if not isinstance(F, (ufl.Form, slate.TensorBase)):
         raise TypeError(
             f"Provided residual is a '{type(F).__name__}', not a Form or Slate Tensor"
@@ -70,9 +70,10 @@ class DAEProblem(object):
         bcs=None,
         J=None,
         Jp=None,
+        M=None,
+        p=None,
         form_compiler_parameters=None,
         is_linear=False,
-        M=None,
     ):
         r"""
         :param F: the nonlinear form
@@ -107,6 +108,7 @@ class DAEProblem(object):
         self.F = F
         self.Jp = Jp
         self.M = M
+        self.p = p
         if not isinstance(self.u, function.Function):
             raise TypeError(
                 "Provided solution is a '%s', not a Function" % type(self.u).__name__
@@ -128,11 +130,8 @@ class DAEProblem(object):
             F, u
         )
 
-        # Obtain the jacobian of the goal function w.r.t. solution
-        self.dMdu = ufl_expr.derivative(M, u)
-
         # Argument checking
-        check_pde_args(self.F, self.J, self.Jp, self.M)
+        check_forms(self.F, self.J, self.Jp, self.M)
 
         # Store form compiler parameters
         self.form_compiler_parameters = form_compiler_parameters
@@ -285,6 +284,22 @@ class DAESolver(OptionsManager):
         dm = self.ts.getDM()
         with dmhooks.add_hooks(dm, self, appctx=self._ctx, save=False):
             self.set_from_options(self.ts)
+
+        if problem.M:
+            # Now create QuadratureTS for integrating the cost integral
+            self.quad_ts = self.ts.createQuadratureTS(forward=True)
+
+            # We want to attach solver._ctx to DM of QuadratureTS
+            # to be able to modify the data attached to the solver
+            # from the RHSFunction, Jacobian, JacobianP
+            self.quad_dm = self.quad_ts.getDM()
+            dmhooks.push_appctx(self.quad_dm, ctx)
+            ctx.set_quad_rhsfunction(self.quad_ts)
+            ctx.set_quad_rhsjacobian(self.quad_ts)
+            ctx.set_quad_rhsjacobianP(self.quad_ts)
+            ctx.set_rhsjacobianP(self.ts)
+            ctx.set_cost_gradients(self.ts)
+
 
         # Used for custom grid transfer.
         self._transfer_operators = ()
