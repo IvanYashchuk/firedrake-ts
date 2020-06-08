@@ -195,7 +195,7 @@ class _TSContext(object):
 
     def set_quad_rhsjacobianP(self, ts):
         r"""Set the function to compute the cost function integrand jacobian w.r.t p"""
-        ts.setRHSJacobian(self.form_cost_jacobianP, J=self._Mjac_p)
+        ts.setRHSJacobianP(self.form_cost_jacobianP, A=self._Mjac_p)
 
     def set_rhsjacobianP(self, ts):
         r"""Set the function to compute the residual RHS jacobian w.r.t p"""
@@ -444,8 +444,8 @@ class _TSContext(object):
         J.assemble()
 
     @staticmethod
-    def form_cost_jacobianP(ts, t, X, J, P):
-        r"""Form the jacobian of the cost function w.r.t. p (not P the preconditioner)
+    def form_cost_jacobianP(ts, t, X, J):
+        r"""Form the jacobian of the cost function w.r.t. p
 
         :arg ts: a PETSc TS object
         :arg t: the time at step/stage being solved

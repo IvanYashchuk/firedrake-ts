@@ -66,6 +66,7 @@ class DAEProblem(object):
         u,
         udot,
         tspan,
+        dt,
         time=None,
         bcs=None,
         J=None,
@@ -103,6 +104,7 @@ class DAEProblem(object):
         self.Jp_eq_J = Jp is None
 
         self.u = u
+        self.u_init = u.copy(deepcopy=True)
         self.udot = udot
         self.tspan = tspan
         self.F = F
@@ -123,6 +125,7 @@ class DAEProblem(object):
         self.time = time or Constant(0.0)
         # timeshift value provided by the solver
         self.shift = Constant(1.0)
+        self.dt = dt
 
         # Use the user-provided Jacobian. If none is provided, derive
         # the Jacobian from the residual.
@@ -247,6 +250,9 @@ class DAESolver(OptionsManager):
 
         self.ts.setMonitor(monitor_callback)
 
+        self.dt = problem.dt
+        self.tspan = problem.tspan
+        self.ts.setTimeStep(self.dt)
         self.ts.setTime(problem.tspan[0])
         self.ts.setMaxTime(problem.tspan[1])
         self.ts.setEquationType(PETSc.TS.EquationType.IMPLICIT)
@@ -300,7 +306,6 @@ class DAESolver(OptionsManager):
             ctx.set_rhsjacobianP(self.ts)
             ctx.set_cost_gradients(self.ts)
 
-
         # Used for custom grid transfer.
         self._transfer_operators = ()
         self._setup = False
@@ -323,6 +328,10 @@ class DAESolver(OptionsManager):
            If bounds are provided the ``snes_type`` must be set to
            ``vinewtonssls`` or ``vinewtonrsls``.
         """
+        self.ts.setTimeStep(self.dt)
+        self.ts.setTime(self.tspan[0])
+        self.ts.setStepNumber(0)
+        self.ts.getCostIntegral().getArray()[0] = 0.0
         # Make sure appcontext is attached to the DM before we solve.
         dm = self.ts.getDM()
         for dbc in self._problem.dirichlet_bcs():
@@ -332,6 +341,8 @@ class DAESolver(OptionsManager):
             lower, upper = bounds
             with lower.dat.vec_ro as lb, upper.dat.vec_ro as ub:
                 self.snes.setVariableBounds(lb, ub)
+
+        self._problem.u.assign(self._problem.u_init)
 
         work = self._work
         with self._problem.u.dat.vec as u:
@@ -351,6 +362,9 @@ class DAESolver(OptionsManager):
             work.copy(u)
         self._setup = True
         check_ts_convergence(self.ts)
+
+    def get_cost_gradients(self):
+        return self._ctx._dMdx, self._ctx._dMdp
 
     def adjoint_solve(self):
         r"""Solve the adjoint problem.
