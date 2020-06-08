@@ -437,7 +437,11 @@ class _TSContext(object):
             X.copy(v)
         ctx._time.assign(t)
 
-        assemble(derivative(ctx.M, ctx._x), tensor=ctx._Mjac_x_vec)
+        from firedrake import homogenize
+
+        assemble(
+            derivative(ctx.M, ctx._x), tensor=ctx._Mjac_x_vec, bcs=homogenize(ctx.bcs_J)
+        )
         Jmat_array = J.getDenseArray()
         with ctx._Mjac_x_vec.dat.vec_ro as v:
             Jmat_array[:, 0] = v.array[:]

@@ -242,6 +242,11 @@ class DAESolver(OptionsManager):
         self.ts = PETSc.TS().create(comm=problem.dm.comm)
         self.snes = self.ts.getSNES()
 
+        self.ts.setType(PETSc.TS.Type.THETA)
+        self.ts.setTheta(
+            0.5
+        )  # adjoint for 1.0 (backward Euler) is currently broken in PETSc
+
         self._problem = problem
 
         self._ctx = ctx
@@ -292,6 +297,7 @@ class DAESolver(OptionsManager):
             self.set_from_options(self.ts)
 
         if problem.M:
+            self.ts.setSaveTrajectory()
             # Now create QuadratureTS for integrating the cost integral
             self.quad_ts = self.ts.createQuadratureTS(forward=True)
 
@@ -365,6 +371,9 @@ class DAESolver(OptionsManager):
 
     def get_cost_gradients(self):
         return self._ctx._dMdx, self._ctx._dMdp
+
+    def get_cost_function(self):
+        return self.ts.getCostIntegral().getArray()[0]
 
     def adjoint_solve(self):
         r"""Solve the adjoint problem.
