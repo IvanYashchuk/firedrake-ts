@@ -168,10 +168,43 @@ class _TSContext(object):
 
     @property
     def transfer_manager(self):
-        if self._transfer_manager is None:
-            from firedrake import TransferManager
+        """This allows the transfer manager to be set from options, e.g.
 
-            self._transfer_manager = TransferManager(use_averaging=True)
+        solver_parameters = {"ksp_type": "cg",
+                             "pc_type": "mg",
+                             "mg_transfer_manager": __name__ + ".manager"}
+
+        The value for "mg_transfer_manager" can either be a specific instantiated
+        object, or a function or class name. In the latter case it will be invoked
+        with no arguments to instantiate the object.
+
+        If "snes_type": "fas" is used, the relevant option is "fas_transfer_manager",
+        with the same semantics.
+        """
+        if self._transfer_manager is None:
+            opts = PETSc.Options()
+            prefix = self.options_prefix or ""
+            if opts.hasName(prefix + "mg_transfer_manager"):
+                managername = opts[prefix + "mg_transfer_manager"]
+            elif opts.hasName(prefix + "fas_transfer_manager"):
+                managername = opts[prefix + "fas_transfer_manager"]
+            else:
+                managername = None
+
+            if managername is None:
+                from firedrake import TransferManager
+
+                transfer = TransferManager(use_averaging=True)
+            else:
+                (modname, objname) = managername.rsplit(".", 1)
+                mod = __import__(modname)
+                obj = getattr(mod, objname)
+                if isinstance(obj, type):
+                    transfer = obj()
+                else:
+                    transfer = obj
+
+            self._transfer_manager = transfer
         return self._transfer_manager
 
     @transfer_manager.setter
@@ -407,14 +440,15 @@ class _TSContext(object):
 
         fine = ctx._fine
         if fine is not None:
-            _, _, inject = dmhooks.get_transfer_operators(fine._x.function_space().dm)
-            inject(fine._x, ctx._x)
+            manager = dmhooks.get_transfer_operators(fine._x.function_space().dm)
+            manager.inject(fine._x, ctx._x)
 
             for bc in itertools.chain(*ctx._problem.bcs):
                 if isinstance(bc, DirichletBC):
                     bc.apply(ctx._x)
 
         ctx._assemble_jac()
+
         if ctx.Jp is not None:
             assert P.handle == ctx._pjac.petscmat.handle
             ctx._assemble_pjac()
