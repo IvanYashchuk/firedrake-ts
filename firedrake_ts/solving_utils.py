@@ -57,13 +57,17 @@ class _TSContext(object):
         before Jacobian assembly
     :arg pre_function_callback: User-defined function called immediately
         before residual assembly
-    :arg options_prefix: The options prefix of the SNES.
+    :arg post_jacobian_callback: User-defined function called immediately
+        after Jacobian assembly
+    :arg post_function_callback: User-defined function called immediately
+        after residual assembly
+    :arg options_prefix: The options prefix of the TS.
     :arg transfer_manager: Object that can transfer functions between
         levels, typically a :class:`~.TransferManager`
 
-    The idea here is that the SNES holds a shell DM which contains
-    this object as "user context".  When the SNES calls back to the
-    user form_function code, we pull the DM out of the SNES and then
+    The idea here is that the TS holds a shell DM which contains
+    this object as "user context".  When the TS calls back to the
+    user form_function code, we pull the DM out of the TS and then
     get the context (which is one of these objects) to find the
     Firedrake level information.
     """
@@ -76,6 +80,8 @@ class _TSContext(object):
         appctx=None,
         pre_jacobian_callback=None,
         pre_function_callback=None,
+        post_jacobian_callback=None,
+        post_function_callback=None,
         options_prefix=None,
         transfer_manager=None,
     ):
@@ -94,6 +100,8 @@ class _TSContext(object):
         self._problem = problem
         self._pre_jacobian_callback = pre_jacobian_callback
         self._pre_function_callback = pre_function_callback
+        self._post_jacobian_callback = post_jacobian_callback
+        self._post_function_callback = post_function_callback
 
         self.fcp = problem.form_compiler_parameters
         # Function to hold current guess
@@ -314,9 +322,13 @@ class _TSContext(object):
         ctx._time.assign(t)
 
         if ctx._pre_function_callback is not None:
-            ctx._pre_function_callback(X)
+            ctx._pre_function_callback(X, Xdot)
 
         ctx._assemble_residual()
+
+        if ctx._post_function_callback is not None:
+            with ctx._F.dat.vec as F_:
+                ctx._post_function_callback(X, Xdot, F_)
 
         # F may not be the same vector as self._F, so copy
         # residual out to F.
@@ -355,10 +367,13 @@ class _TSContext(object):
         ctx._time.assign(t)
 
         if ctx._pre_jacobian_callback is not None:
-            ctx._pre_jacobian_callback(X)
+            ctx._pre_jacobian_callback(X, Xdot)
 
         ctx._shift.assign(shift)
         ctx._assemble_jac()
+
+        if ctx._post_jacobian_callback is not None:
+            ctx._post_jacobian_callback(X, Xdot, J)
 
         if ctx.Jp is not None:
             assert P.handle == ctx._pjac.petscmat.handle
