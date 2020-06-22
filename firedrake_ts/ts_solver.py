@@ -11,6 +11,7 @@ from firedrake.petsc import PETSc, OptionsManager
 from firedrake.bcs import DirichletBC
 
 from firedrake_ts.solving_utils import check_ts_convergence, _TSContext
+from firedrake_ts.adjoint import DAESolverMixin, DAEProblemMixin
 
 
 def check_forms(F, J, Jp, M):
@@ -60,6 +61,7 @@ def is_form_consistent(is_linear, bcs):
 class DAEProblem(object):
     r"""Nonlinear variational problem in DAE form F(t, u, udot; v) = 0."""
 
+    @DAEProblemMixin._ad_annotate_init
     def __init__(
         self,
         F,
@@ -152,6 +154,7 @@ class DAEProblem(object):
 class DAESolver(OptionsManager):
     r"""Solves a :class:`DAEProblem`."""
 
+    @DAESolverMixin._ad_annotate_init
     def __init__(self, problem, **kwargs):
         r"""
         :arg problem: A :class:`DAEProblem` to solve.
@@ -325,6 +328,7 @@ class DAESolver(OptionsManager):
         """
         self._ctx.transfer_manager = manager
 
+    @DAESolverMixin._ad_annotate_solve
     def solve(self, bounds=None):
         r"""Solve the time-dependent variational problem.
         :arg bounds: Optional bounds on the solution (lower, upper).
@@ -340,7 +344,6 @@ class DAESolver(OptionsManager):
         if self._problem.M:
             self.ts.getCostIntegral().getArray()[0] = 0.0
         # Make sure appcontext is attached to the DM before we solve.
-        self._problem.u.assign(self._problem.u_init)
         dm = self.ts.getDM()
         for dbc in self._problem.dirichlet_bcs():
             dbc.apply(self._problem.u)
@@ -349,7 +352,6 @@ class DAESolver(OptionsManager):
             lower, upper = bounds
             with lower.dat.vec_ro as lb, upper.dat.vec_ro as ub:
                 self.snes.setVariableBounds(lb, ub)
-
 
         work = self._work
         with self._problem.u.dat.vec as u:
@@ -369,6 +371,11 @@ class DAESolver(OptionsManager):
             work.copy(u)
         self._setup = True
         check_ts_convergence(self.ts)
+
+        if self._problem.M:
+            return self.get_cost_function()
+        else:
+            return self._problem.u
 
     def get_cost_gradients(self):
         return self._ctx._dMdx, self._ctx._dMdp
