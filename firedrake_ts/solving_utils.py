@@ -9,6 +9,8 @@ from firedrake.petsc import PETSc
 from firedrake.formmanipulation import ExtractSubBlock
 from firedrake.utils import cached_property
 
+from pyadjoint import no_annotations
+
 
 def _make_reasons(reasons):
     return dict(
@@ -395,6 +397,7 @@ class _TSContext(object):
         ctx.set_nullspace(ctx._near_nullspace, ises, transpose=False, near=True)
 
     @staticmethod
+    @no_annotations
     def form_cost_integrand(ts, t, X, R):
         r"""Form the integrand of the nost function
 
@@ -417,6 +420,7 @@ class _TSContext(object):
         R.set(j_value)
 
     @staticmethod
+    @no_annotations
     def form_cost_jacobian(ts, t, X, J, P):
         r"""Form the jacobian of the nost function
 
@@ -448,6 +452,7 @@ class _TSContext(object):
         J.assemble()
 
     @staticmethod
+    @no_annotations
     def form_cost_jacobianP(ts, t, X, J):
         r"""Form the jacobian of the cost function w.r.t. p
 
@@ -475,6 +480,7 @@ class _TSContext(object):
         J.assemble()
 
     @staticmethod
+    @no_annotations
     def form_rhs_jacobianP(ts, t, X, J):
         r"""Form the jacobian of the RHS function w.r.t. p (not P the preconditioner)
         :arg ts: a PETSc TS object
