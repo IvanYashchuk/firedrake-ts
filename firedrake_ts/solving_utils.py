@@ -3,7 +3,7 @@ import numpy
 import itertools
 
 from pyop2 import op2
-from firedrake import function, dmhooks
+from firedrake import function, dmhooks, ufl_expr
 from firedrake.exceptions import ConvergenceError
 from firedrake.petsc import PETSc
 from firedrake.formmanipulation import ExtractSubBlock
@@ -128,6 +128,8 @@ class _TSContext(object):
         self.pmatfree = pmatfree
         self.F = problem.F
         self.J = problem.J
+        self.G = problem.G
+        self.dGdu = problem.dGdu
 
         # For Jp to equal J, bc.Jp must equal bc.J for all EquationBC objects.
         Jp_eq_J = problem.Jp is None and all(bc.Jp_eq_J for bc in problem.bcs)
@@ -146,6 +148,12 @@ class _TSContext(object):
         self.bcs_F = [
             bc if isinstance(bc, DirichletBC) else bc._F for bc in problem.bcs
         ]
+        self.bcs_G = [
+            bc if isinstance(bc, DirichletBC) else bc._G for bc in problem.bcs
+        ]
+        self.bcs_dGdu = [
+            bc if isinstance(bc, DirichletBC) else bc._dGdu for bc in problem.bcs
+        ]
         self.bcs_J = [
             bc if isinstance(bc, DirichletBC) else bc._J for bc in problem.bcs
         ]
@@ -155,8 +163,26 @@ class _TSContext(object):
         self._assemble_residual = create_assembly_callable(
             self.F, tensor=self._F, bcs=self.bcs_F, form_compiler_parameters=self.fcp
         )
+        if self.G is not None:
+            from firedrake import LinearSolver
+            from firedrake import assemble
+
+            self._assemble_rhs_residual = create_assembly_callable(
+                self.G,
+                tensor=self._G,
+                bcs=self.bcs_G,
+                form_compiler_parameters=self.fcp,
+            )
+            mass_matrix = assemble(
+                ufl_expr.derivative(self.F, self._xdot), bcs=self.bcs_G
+            )
+            self._rhs_projection_solver = LinearSolver(mass_matrix)
+        else:
+            self._assemble_rhs_residual = None
+            self._rhs_projection_solver = None
 
         self._jacobian_assembled = False
+        self._rhs_jacobian_assembled = False
         self._splits = {}
         self._coarse = None
         self._fine = None
@@ -221,6 +247,21 @@ class _TSContext(object):
     def set_ijacobian(self, ts):
         r"""Set the function to compute the matrix dF/dU + a*dF/dU_t where F(t,U,U_t) is the function provided with set_ifunction()"""
         ts.setIJacobian(self.form_jacobian, J=self._jac.petscmat, P=self._pjac.petscmat)
+
+    def set_rhs_function(self, ts):
+        r"""Set the function to compute G(t,u) where F() = G() is the equation to be solved."""
+        if self.G is not None:
+            with self._projected_G.dat.vec_wo as v:
+                ts.setRHSFunction(self.form_rhs_function, f=v)
+
+    def set_rhs_jacobian(self, ts):
+        r"""Set the function to compute the Jacobian of G, where U_t = G(U,t), as well as the location to store the matrix."""
+        if self.G is not None:
+            ts.setRHSJacobian(
+                self.form_rhs_jacobian,
+                J=self._rhs_jac.petscmat,
+                P=self._rhs_pjac.petscmat,
+            )
 
     def set_nullspace(self, nullspace, ises=None, transpose=False, near=False):
         if nullspace is None:
@@ -298,6 +339,11 @@ class _TSContext(object):
                 Jp = replace(Jp, {problem.u: u})
             else:
                 Jp = None
+            if problem.G is not None:
+                G = splitter.split(problem.G, argument_indices=(field,))
+                G = replace(G, {problem.u: u})
+            else:
+                G = None
             bcs = []
             for bc in problem.bcs:
                 if isinstance(bc, DirichletBC):
@@ -321,6 +367,7 @@ class _TSContext(object):
                 J=J,
                 Jp=Jp,
                 form_compiler_parameters=problem.form_compiler_parameters,
+                G=G,
             )
             new_problem._constant_jacobian = problem._constant_jacobian
             splits.append(
@@ -413,6 +460,73 @@ class _TSContext(object):
             ctx._assemble_pjac()
 
         ises = problem.J.arguments()[0].function_space()._ises
+        ctx.set_nullspace(ctx._nullspace, ises, transpose=False, near=False)
+        ctx.set_nullspace(ctx._nullspace_T, ises, transpose=True, near=False)
+        ctx.set_nullspace(ctx._near_nullspace, ises, transpose=False, near=True)
+
+    @staticmethod
+    def form_rhs_function(ts, t, X, G):
+        r"""Form the residual for this problem
+
+        :arg ts: a PETSc TS object
+        :arg t: the time at step/stage being solved
+        :arg X: state vector
+        :arg G: function vector
+        """
+        dm = ts.getDM()
+        ctx = dmhooks.get_appctx(dm)
+        # X may not be the same vector as the vec behind self._x, so
+        # copy guess in from X.
+        with ctx._x.dat.vec_wo as v:
+            X.copy(v)
+        ctx._time.assign(t)
+
+        # TODO: Add pre_rhs_function_callback
+
+        ctx._assemble_projected_rhs_residual()
+
+        # TODO: Add post_rhs_function_callback
+
+        # G may not be the same vector as self._G, so copy
+        # residual out to G.
+        with ctx._G.dat.vec_ro as v:
+            v.copy(G)
+
+    @staticmethod
+    def form_rhs_jacobian(ts, t, X, J, P):
+        r"""Form the Jacobian for this problem
+
+        :arg ts: a PETSc TS object
+        :arg t: the time at step/stage being solved
+        :arg X: state vector
+        :arg J: the Jacobian (a Mat)
+        :arg P: the preconditioner matrix (a Mat)
+        """
+        dm = ts.getDM()
+        ctx = dmhooks.get_appctx(dm)
+        problem = ctx._problem
+
+        assert J.handle == ctx._rhs_jac.petscmat.handle
+        # TODO: Check how to use constant jacobian properly for TS
+        if problem._constant_jacobian and ctx._rhs_jacobian_assembled:
+            # Don't need to do any work with a constant jacobian
+            # that's already assembled
+            return
+        ctx._rhs_jacobian_assembled = True
+
+        # X may not be the same vector as the vec behind self._x, so
+        # copy guess in from X.
+        with ctx._x.dat.vec_wo as v:
+            X.copy(v)
+        ctx._time.assign(t)
+
+        # TODO: Add pre_rhs_jacobian_callback
+
+        ctx._assemble_rhs_jac()
+
+        # TODO: Add post_rhs_jacobian_callback
+
+        ises = problem.dGdu.arguments()[0].function_space()._ises
         ctx.set_nullspace(ctx._nullspace, ises, transpose=False, near=False)
         ctx.set_nullspace(ctx._nullspace_T, ises, transpose=True, near=False)
         ctx.set_nullspace(ctx._near_nullspace, ises, transpose=False, near=True)
@@ -513,3 +627,61 @@ class _TSContext(object):
     @cached_property
     def _F(self):
         return function.Function(self.F.arguments()[0].function_space())
+
+    @cached_property
+    def _G(self):
+        return function.Function(self.G.arguments()[0].function_space())
+
+    @cached_property
+    def _projected_G(self):
+        return function.Function(self.G.arguments()[0].function_space())
+
+    # @cached_property
+    def _assemble_projected_rhs_residual(self):
+        if self.G is not None:
+            # from firedrake import ufl_expr
+            # from firedrake import solve
+            # from firedrake import LinearSolver
+
+            self._assemble_rhs_residual()
+            self._rhs_projection_solver.solve(self._projected_G, self._G)
+            # solve(mass_matrix_form == self.G, self._G, self.bcs_G)
+
+    @cached_property
+    def _rhs_jac(self):
+        if self.G is not None:
+            from firedrake.assemble import allocate_matrix
+
+            return allocate_matrix(
+                self.dGdu,
+                bcs=self.bcs_dGdu,
+                form_compiler_parameters=self.fcp,
+                mat_type=self.mat_type,
+                appctx=self.appctx,
+                options_prefix=self.options_prefix,
+            )
+        else:
+            return None
+
+    @cached_property
+    def _rhs_pjac(self):
+        return self._rhs_jac
+
+    @cached_property
+    def _assemble_rhs_jac(self):
+        if self.G is not None:
+            from firedrake.assemble import create_assembly_callable
+
+            return create_assembly_callable(
+                self.dGdu,
+                tensor=self._rhs_jac,
+                bcs=self.bcs_dGdu,
+                form_compiler_parameters=self.fcp,
+                mat_type=self.mat_type,
+            )
+        else:
+            return None
+
+    @cached_property
+    def _assemble_rhs_pjac(self):
+        return self._assemble_rhs_jac

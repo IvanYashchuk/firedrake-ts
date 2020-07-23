@@ -13,13 +13,19 @@ from firedrake.bcs import DirichletBC
 from firedrake_ts.solving_utils import check_ts_convergence, _TSContext
 
 
-def check_pde_args(F, J, Jp):
+def check_pde_args(F, G, J, Jp):
     if not isinstance(F, (ufl.Form, slate.TensorBase)):
         raise TypeError(
             f"Provided residual is a '{type(F).__name__}', not a Form or Slate Tensor"
         )
     if len(F.arguments()) != 1:
         raise ValueError("Provided residual is not a linear form")
+    if G is not None and not isinstance(G, (ufl.Form, slate.TensorBase)):
+        raise TypeError(
+            f"Provided G residual is a '{type(G).__name__}', not a Form or Slate Tensor"
+        )
+    if G is not None and len(G.arguments()) != 1:
+        raise ValueError("Provided G residual is not a linear form")
     if not isinstance(J, (ufl.Form, slate.TensorBase)):
         raise TypeError(
             f"Provided Jacobian is a '{type(J).__name__}', not a Form or Slate Tensor"
@@ -61,6 +67,7 @@ class DAEProblem(object):
         Jp=None,
         form_compiler_parameters=None,
         is_linear=False,
+        G=None,
     ):
         r"""
         :param F: the nonlinear form
@@ -77,6 +84,8 @@ class DAEProblem(object):
             compiler (optional)
         :is_linear: internally used to check if all domain/bc forms
             are given either in 'A == b' style or in 'F == 0' style.
+        :param G: "Slow" part G(t, u) that will be treated explicitly
+            when using an IMEX method for solving F(u̇, u, t) = G(u, t).
         """
         from firedrake import solving
         from firedrake import function, Constant
@@ -91,6 +100,7 @@ class DAEProblem(object):
         self.udot = udot
         self.tspan = tspan
         self.F = F
+        self.G = G
         self.Jp = Jp
         if not isinstance(self.u, function.Function):
             raise TypeError(
@@ -113,8 +123,11 @@ class DAEProblem(object):
             F, u
         )
 
+        # Derive the Jacobian for G residual.
+        self.dGdu = ufl_expr.derivative(G, u) if G is not None else None
+
         # Argument checking
-        check_pde_args(self.F, self.J, self.Jp)
+        check_pde_args(self.F, self.G, self.J, self.Jp)
 
         # Store form compiler parameters
         self.form_compiler_parameters = form_compiler_parameters
@@ -247,6 +260,9 @@ class DAESolver(OptionsManager):
 
         ctx.set_ifunction(self.ts)
         ctx.set_ijacobian(self.ts)
+        ctx.set_rhs_function(self.ts)
+        # TODO: Segfault with set_rhs_jacobian
+        # ctx.set_rhs_jacobian(self.ts)
         ctx.set_nullspace(
             nullspace,
             problem.J.arguments()[0].function_space()._ises,
