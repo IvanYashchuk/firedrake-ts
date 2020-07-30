@@ -577,7 +577,7 @@ class _TSContext(object):
         from firedrake import derivative
         from firedrake.assemble import assemble
 
-        local_dofs = self._Mjac_x_vec.dat.data.shape[0]
+        local_dofs = self._Mjac_x_vec.dat.data.size
         djdu_transposed_mat = PETSc.Mat().createDense(
             [[local_dofs, self._Mjac_x_vec.ufl_function_space().dim()], [1, 1]]
         )
@@ -594,7 +594,7 @@ class _TSContext(object):
         from firedrake import derivative
         from firedrake.assemble import assemble
 
-        local_dofs = self._Mjac_p_vec.dat.data.shape[0]
+        local_dofs = self._Mjac_p_vec.dat.data.size
         djdp_transposed_mat = PETSc.Mat().createDense(
             [[local_dofs, self._Mjac_p_vec.ufl_function_space().dim()], [1, 1]]
         )
