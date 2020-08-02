@@ -1,6 +1,7 @@
 import numpy
 
 import itertools
+from firedrake import homogenize
 
 from pyop2 import op2
 from firedrake import function, dmhooks
@@ -123,9 +124,9 @@ class _TSContext(object):
         self.F = problem.F
         self.J = problem.J
 
-        if problem.M:
-            self.M = problem.M
-            self.p = problem.p
+        self.M = problem.M
+        self.p = problem.p
+        self.m = problem.m
 
         # For Jp to equal J, bc.Jp must equal bc.J for all EquationBC objects.
         Jp_eq_J = problem.Jp is None and all(bc.Jp_eq_J for bc in problem.bcs)
@@ -204,7 +205,15 @@ class _TSContext(object):
         ts.setRHSJacobianP(self.form_rhs_jacobianP, self._dFdp.petscmat)
 
     def set_cost_gradients(self, ts):
-        r"""Set the function to compute the residual RHS jacobian w.r.t p"""
+        from firedrake import assemble, derivative
+
+        if self.m:
+            assemble(
+                derivative(self.m, self._x),
+                tensor=self._dMdx,
+                bcs=homogenize(self.bcs_F),
+            )
+            assemble(derivative(self.m, self.p), tensor=self._dMdp)
         with self._dMdx.dat.vec as dMdu_vec, self._dMdp.dat.vec as dMdp_vec:
             ts.setCostGradients(dMdu_vec, dMdp_vec)
 
@@ -440,8 +449,6 @@ class _TSContext(object):
         with ctx._x.dat.vec_wo as v:
             X.copy(v)
         ctx._time.assign(t)
-
-        from firedrake import homogenize
 
         assemble(
             derivative(ctx.M, ctx._x), tensor=ctx._Mjac_x_vec, bcs=homogenize(ctx.bcs_J)

@@ -2,7 +2,7 @@ import ufl
 from itertools import chain
 from contextlib import ExitStack
 
-from firedrake import dmhooks
+from firedrake import dmhooks, assemble
 from firedrake import slate
 from firedrake import solving_utils
 from firedrake import ufl_expr
@@ -13,7 +13,7 @@ from firedrake.bcs import DirichletBC
 from firedrake_ts.solving_utils import check_ts_convergence, _TSContext
 
 
-def check_forms(F, J, Jp, M):
+def check_forms(F, J, Jp, M, m):
     if not isinstance(F, (ufl.Form, slate.TensorBase)):
         raise TypeError(
             f"Provided residual is a '{type(F).__name__}', not a Form or Slate Tensor"
@@ -72,6 +72,7 @@ class DAEProblem(object):
         J=None,
         Jp=None,
         M=None,
+        m=None,
         p=None,
         form_compiler_parameters=None,
         is_linear=False,
@@ -91,7 +92,9 @@ class DAEProblem(object):
             compiler (optional)
         :is_linear: internally used to check if all domain/bc forms
             are given either in 'A == b' style or in 'F == 0' style.
-        :param M: Functional which employs the TS solution and used by TSAdjoint
+        :param M: Functional integrated in time which employs the TS solution and used by TSAdjoint
+                in the derivative calculation
+        :param M: Functional at terminal time which employs the TS solution and used by TSAdjoint
                 in the derivative calculation
         """
         from firedrake import solving
@@ -110,6 +113,7 @@ class DAEProblem(object):
         self.F = F
         self.Jp = Jp
         self.M = M
+        self.m = m
         self.p = p
         if not isinstance(self.u, function.Function):
             raise TypeError(
@@ -134,7 +138,7 @@ class DAEProblem(object):
         )
 
         # Argument checking
-        check_forms(self.F, self.J, self.Jp, self.M)
+        check_forms(self.F, self.J, self.Jp, self.M, self.m)
 
         # Store form compiler parameters
         self.form_compiler_parameters = form_compiler_parameters
@@ -310,7 +314,9 @@ class DAESolver(OptionsManager):
             ctx.set_quad_rhsjacobian(self.quad_ts)
             ctx.set_quad_rhsjacobianP(self.quad_ts)
             ctx.set_rhsjacobianP(self.ts)
-            ctx.set_cost_gradients(self.ts)
+        if problem.m:
+            self.ts.setSaveTrajectory()
+            ctx.set_rhsjacobianP(self.ts)
 
         # Used for custom grid transfer.
         self._transfer_operators = ()
@@ -350,7 +356,6 @@ class DAESolver(OptionsManager):
             with lower.dat.vec_ro as lb, upper.dat.vec_ro as ub:
                 self.snes.setVariableBounds(lb, ub)
 
-
         work = self._work
         with self._problem.u.dat.vec as u:
             u.copy(work)
@@ -374,9 +379,18 @@ class DAESolver(OptionsManager):
         return self._ctx._dMdx, self._ctx._dMdp
 
     def get_cost_function(self):
-        return self.ts.getCostIntegral().getArray()[0]
+        if self._ctx.m:
+            final_cost = assemble(self._ctx.m)
+        else:
+            final_cost = 0.0
+        if self._ctx.M:
+            integrated_cost = self.ts.getCostIntegral().getArray()[0]
+        else:
+            integrated_cost = 0.0
+        return final_cost + integrated_cost
 
     def adjoint_solve(self):
+        self._ctx.set_cost_gradients(self.ts)
         r"""Solve the adjoint problem.
         """
         # Make sure appcontext is attached to the DM before the adjoint solve.
