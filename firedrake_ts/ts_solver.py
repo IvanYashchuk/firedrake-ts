@@ -430,7 +430,7 @@ class DAESolver(OptionsManager):
         self._ctx.set_cost_gradients(self.ts)
         r"""Solve the adjoint problem.
         """
-        self._set_problem(
+        self._set_problem_eval_funcs(
             self._ctx,
             self._problem,
             self.nullspace,
