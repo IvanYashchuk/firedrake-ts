@@ -221,6 +221,10 @@ class DAESolver(OptionsManager):
         post_f_callback = kwargs.get("post_function_callback")
         monitor_callback = kwargs.get("monitor_callback")
 
+        self.nullspace = nullspace
+        self.near_nullspace = near_nullspace
+        self.nullspace_T = nullspace_T
+
         super(DAESolver, self).__init__(parameters, options_prefix)
 
         # Allow anything, interpret "matfree" as matrix_free.
@@ -277,6 +281,31 @@ class DAESolver(OptionsManager):
         # allow a certain number of failures (step will be rejected and retried)
         self.set_default_parameter("ts_max_snes_failures", 5)
 
+        self._set_problem(ctx, problem, nullspace, nullspace_T, near_nullspace)
+
+        # Set from options now. We need the
+        # DM with an app context in place so that if the DM is active
+        # on a subKSP the context is available.
+        dm = self.ts.getDM()
+        with dmhooks.add_hooks(dm, self, appctx=self._ctx, save=False):
+            self.set_from_options(self.ts)
+
+        # Used for custom grid transfer.
+        self._transfer_operators = ()
+        self._setup = False
+
+    def _set_problem(self, ctx, problem, nullspace, nullspace_T, near_nullspace):
+        r"""
+        :arg problem: A :class:`DAEProblem` to solve.
+        :arg ctx: A :class:`_TSContext` that contains the residual evaluations
+        :arg nullspace: an optional :class:`.VectorSpaceBasis` (or
+               :class:`.MixedVectorSpaceBasis`) spanning the null
+               space of the operator.
+        :arg nullspace_T: as for the nullspace, but used to
+               make the right hand side consistent.
+        :arg near_nullspace: as for the nullspace, but used to
+               specify the near nullspace (for multigrid solvers).
+        """
         ctx.set_ifunction(self.ts)
         ctx.set_ijacobian(self.ts)
         ctx.set_nullspace(
@@ -348,11 +377,21 @@ class DAESolver(OptionsManager):
            If bounds are provided the ``snes_type`` must be set to
            ``vinewtonssls`` or ``vinewtonrsls``.
         """
+
+        self._set_problem(
+            self._ctx,
+            self._problem,
+            self.nullspace,
+            self.nullspace_T,
+            self.near_nullspace,
+        )
+
         self.ts.setTimeStep(self.dt)
         self.ts.setTime(self.tspan[0])
         self.ts.setStepNumber(0)
         if self._problem.M:
             self.ts.getCostIntegral().getArray()[0] = 0.0
+
         # Make sure appcontext is attached to the DM before we solve.
         self._problem.u.assign(self._problem.u_init)
         dm = self.ts.getDM()
