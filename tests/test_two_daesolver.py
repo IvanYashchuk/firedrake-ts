@@ -19,7 +19,6 @@ def test_two_ts():
     u.interpolate(bump)
 
 
-    dt = 2e-2
     problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 1.0), bcs=bc)
     solver = firedrake_ts.DAESolver(problem)
 

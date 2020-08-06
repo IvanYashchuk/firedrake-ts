@@ -249,7 +249,7 @@ class DAESolver(OptionsManager):
         # allow a certain number of failures (step will be rejected and retried)
         self.set_default_parameter("ts_max_snes_failures", 5)
 
-        self._set_problem(ctx, problem, nullspace, nullspace_T, near_nullspace)
+        self._set_problem_eval_funcs(ctx, problem, nullspace, nullspace_T, near_nullspace)
 
         # Set from options now. We need the
         # DM with an app context in place so that if the DM is active
@@ -262,7 +262,7 @@ class DAESolver(OptionsManager):
         self._transfer_operators = ()
         self._setup = False
 
-    def _set_problem(self, ctx, problem, nullspace, nullspace_T, near_nullspace):
+    def _set_problem_eval_funcs(self, ctx, problem, nullspace, nullspace_T, near_nullspace):
         r"""
         :arg problem: A :class:`DAEProblem` to solve.
         :arg ctx: A :class:`_TSContext` that contains the residual evaluations
@@ -317,7 +317,7 @@ class DAESolver(OptionsManager):
            ``vinewtonssls`` or ``vinewtonrsls``.
         """
 
-        self._set_problem(
+        self._set_problem_eval_funcs(
             self._ctx,
             self._problem,
             self.nullspace,
