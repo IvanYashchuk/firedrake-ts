@@ -294,6 +294,24 @@ class DAESolver(OptionsManager):
         self._transfer_operators = ()
         self._setup = False
 
+        if problem.M:
+            self.ts.setSaveTrajectory()
+            # Now create QuadratureTS for integrating the cost integral
+            self.quad_ts = self.ts.createQuadratureTS(forward=True)
+
+            # We want to attach solver._ctx to DM of QuadratureTS
+            # to be able to modify the data attached to the solver
+            # from the RHSFunction, Jacobian, JacobianP
+            self.quad_dm = self.quad_ts.getDM()
+            dmhooks.push_appctx(self.quad_dm, ctx)
+            ctx.set_quad_rhsfunction(self.quad_ts)
+            ctx.set_quad_rhsjacobian(self.quad_ts)
+            ctx.set_quad_rhsjacobianP(self.quad_ts)
+            ctx.set_rhsjacobianP(self.ts)
+        if problem.m:
+            self.ts.setSaveTrajectory()
+            ctx.set_rhsjacobianP(self.ts)
+
     def _set_problem(self, ctx, problem, nullspace, nullspace_T, near_nullspace):
         r"""
         :arg problem: A :class:`DAEProblem` to solve.
@@ -330,34 +348,6 @@ class DAESolver(OptionsManager):
         ctx._nullspace_T = nullspace_T
         ctx._near_nullspace = near_nullspace
 
-        # Set from options now. We need the
-        # DM with an app context in place so that if the DM is active
-        # on a subKSP the context is available.
-        dm = self.ts.getDM()
-        with dmhooks.add_hooks(dm, self, appctx=self._ctx, save=False):
-            self.set_from_options(self.ts)
-
-        if problem.M:
-            self.ts.setSaveTrajectory()
-            # Now create QuadratureTS for integrating the cost integral
-            self.quad_ts = self.ts.createQuadratureTS(forward=True)
-
-            # We want to attach solver._ctx to DM of QuadratureTS
-            # to be able to modify the data attached to the solver
-            # from the RHSFunction, Jacobian, JacobianP
-            self.quad_dm = self.quad_ts.getDM()
-            dmhooks.push_appctx(self.quad_dm, ctx)
-            ctx.set_quad_rhsfunction(self.quad_ts)
-            ctx.set_quad_rhsjacobian(self.quad_ts)
-            ctx.set_quad_rhsjacobianP(self.quad_ts)
-            ctx.set_rhsjacobianP(self.ts)
-        if problem.m:
-            self.ts.setSaveTrajectory()
-            ctx.set_rhsjacobianP(self.ts)
-
-        # Used for custom grid transfer.
-        self._transfer_operators = ()
-        self._setup = False
 
     def set_transfer_manager(self, manager):
         r"""Set the object that manages transfer between grid levels.
