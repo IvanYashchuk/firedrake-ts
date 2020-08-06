@@ -356,6 +356,13 @@ class DAESolver(OptionsManager):
     def adjoint_solve(self):
         r"""Solve the adjoint problem.
         """
+        self._set_problem(
+            self._ctx,
+            self._problem,
+            self.nullspace,
+            self.nullspace_T,
+            self.near_nullspace,
+        )
         # Make sure appcontext is attached to the DM before the adjoint solve.
         dm = self.ts.getDM()
 
