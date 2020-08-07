@@ -26,11 +26,11 @@ def check_ts_convergence(ts):
     # TSADJOINT_DIVERGED_LINEAR_SOLVE = -4
     if r == -3:
         raise ConvergenceError(
-            f"TS solve failed to converge. Reason: TSFORWARD_DIVERGED_LINEAR_SOLVE"
+            "TS solve failed to converge. Reason: TSFORWARD_DIVERGED_LINEAR_SOLVE"
         )
     if r == -4:
         raise ConvergenceError(
-            f"TS solve failed to converge. Reason: TSADJOINT_DIVERGED_LINEAR_SOLVE"
+            "TS solve failed to converge. Reason: TSADJOINT_DIVERGED_LINEAR_SOLVE"
         )
     reason = TSReasons[r]
     if r < 0:
