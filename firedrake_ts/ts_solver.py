@@ -268,8 +268,8 @@ class DAESolver(OptionsManager):
         self, ctx, problem, nullspace, nullspace_T, near_nullspace
     ):
         r"""
-        :arg problem: A :class:`DAEProblem` to solve.
         :arg ctx: A :class:`_TSContext` that contains the residual evaluations
+        :arg problem: A :class:`DAEProblem` to solve.
         :arg nullspace: an optional :class:`.VectorSpaceBasis` (or
                :class:`.MixedVectorSpaceBasis`) spanning the null
                space of the operator.
