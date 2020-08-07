@@ -4,6 +4,9 @@ import firedrake_ts
 
 
 def test_two_ts():
+    """
+    A test for issue #4 https://github.com/IvanYashchuk/firedrake-ts/issues/4
+    """
     mesh = UnitIntervalMesh(10)
     V = FunctionSpace(mesh, "P", 1)
 
@@ -31,4 +34,7 @@ def test_two_ts():
     problem2 = firedrake_ts.DAEProblem(F2, u2, u_t2, (0.0, 1.0), bcs=bc2)
     solver2 = firedrake_ts.DAESolver(problem2)  # noqa: F841
 
+    # Now, after defining solver2, solver.solve() shouldn't raise any errors
     solver.solve()
+
+    solver2.solve()
