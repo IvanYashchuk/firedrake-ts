@@ -1,6 +1,6 @@
 # This example is based on https://firedrakeproject.org/demos/burgers.py.html
-import firedrake_ts
 from firedrake import *
+import firedrake_ts
 
 n = 30
 mesh = UnitSquareMesh(n, n)

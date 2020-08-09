@@ -3,8 +3,8 @@
 # and
 # https://github.com/firedrakeproject/firedrake-bench/blob/master/cahn_hilliard/firedrake_cahn_hilliard.py
 
-import firedrake_ts
 from firedrake import *
+import firedrake_ts
 
 # Model parameters
 lmbda = 1.0e-02  # surface parameter

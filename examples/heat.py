@@ -1,5 +1,5 @@
-import firedrake_ts
 from firedrake import *
+import firedrake_ts
 
 mesh = UnitIntervalMesh(10)
 V = FunctionSpace(mesh, "P", 1)
