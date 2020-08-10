@@ -2,7 +2,7 @@ import ufl
 from itertools import chain
 from contextlib import ExitStack
 
-from firedrake import dmhooks
+from firedrake import dmhooks, assemble
 from firedrake import slate
 from firedrake import solving_utils
 from firedrake import ufl_expr
@@ -14,7 +14,7 @@ from firedrake_ts.solving_utils import check_ts_convergence, _TSContext
 from firedrake_ts.adjoint import DAESolverMixin, DAEProblemMixin
 
 
-def check_forms(F, J, Jp, M):
+def check_forms(F, J, Jp, M, m):
     if not isinstance(F, (ufl.Form, slate.TensorBase)):
         raise TypeError(
             f"Provided residual is a '{type(F).__name__}', not a Form or Slate Tensor"
@@ -74,6 +74,7 @@ class DAEProblem(object):
         J=None,
         Jp=None,
         M=None,
+        m=None,
         p=None,
         form_compiler_parameters=None,
         is_linear=False,
@@ -93,7 +94,9 @@ class DAEProblem(object):
             compiler (optional)
         :is_linear: internally used to check if all domain/bc forms
             are given either in 'A == b' style or in 'F == 0' style.
-        :param M: Functional which employs the TS solution and used by TSAdjoint
+        :param M: Functional integrated in time which employs the TS solution and used by TSAdjoint
+                in the derivative calculation
+        :param M: Functional at terminal time which employs the TS solution and used by TSAdjoint
                 in the derivative calculation
         """
         from firedrake import solving
@@ -112,6 +115,7 @@ class DAEProblem(object):
         self.F = F
         self.Jp = Jp
         self.M = M
+        self.m = m
         self.p = p
         if not isinstance(self.u, function.Function):
             raise TypeError(
@@ -136,7 +140,7 @@ class DAEProblem(object):
         )
 
         # Argument checking
-        check_forms(self.F, self.J, self.Jp, self.M)
+        check_forms(self.F, self.J, self.Jp, self.M, self.m)
 
         # Store form compiler parameters
         self.form_compiler_parameters = form_compiler_parameters
@@ -179,7 +183,11 @@ class DAESolver(OptionsManager):
                be used, for example, to update a coefficient function
                that has a complicated dependence on the unknown solution.
         :kwarg pre_function_callback: As above, but called immediately
-               before residual assembly
+               before residual assembly.
+        :kwarg post_jacobian_callback: As above, but called after the
+               Jacobian has been assembled.
+        :kwarg post_function_callback: As above, but called immediately
+               after residual assembly.
         :kwarg monitor_callback: A user-defined function that will
                be used at every timestep to display the iteration's progress.
         Example usage of the ``solver_parameters`` option: to set the
@@ -212,7 +220,13 @@ class DAESolver(OptionsManager):
         options_prefix = kwargs.get("options_prefix")
         pre_j_callback = kwargs.get("pre_jacobian_callback")
         pre_f_callback = kwargs.get("pre_function_callback")
+        post_j_callback = kwargs.get("post_jacobian_callback")
+        post_f_callback = kwargs.get("post_function_callback")
         monitor_callback = kwargs.get("monitor_callback")
+
+        self.nullspace = nullspace
+        self.near_nullspace = near_nullspace
+        self.nullspace_T = nullspace_T
 
         super(DAESolver, self).__init__(parameters, options_prefix)
 
@@ -231,6 +245,8 @@ class DAESolver(OptionsManager):
             appctx=appctx,
             pre_jacobian_callback=pre_j_callback,
             pre_function_callback=pre_f_callback,
+            post_jacobian_callback=post_j_callback,
+            post_function_callback=post_f_callback,
             options_prefix=self.options_prefix,
         )
 
@@ -268,6 +284,49 @@ class DAESolver(OptionsManager):
         # allow a certain number of failures (step will be rejected and retried)
         self.set_default_parameter("ts_max_snes_failures", 5)
 
+        self._set_problem_eval_funcs(ctx, problem, nullspace, nullspace_T, near_nullspace)
+
+        # Set from options now. We need the
+        # DM with an app context in place so that if the DM is active
+        # on a subKSP the context is available.
+        dm = self.ts.getDM()
+        with dmhooks.add_hooks(dm, self, appctx=self._ctx, save=False):
+            self.set_from_options(self.ts)
+
+        # Used for custom grid transfer.
+        self._transfer_operators = ()
+        self._setup = False
+
+        if problem.M:
+            self.ts.setSaveTrajectory()
+            # Now create QuadratureTS for integrating the cost integral
+            self.quad_ts = self.ts.createQuadratureTS(forward=True)
+
+            # We want to attach solver._ctx to DM of QuadratureTS
+            # to be able to modify the data attached to the solver
+            # from the RHSFunction, Jacobian, JacobianP
+            self.quad_dm = self.quad_ts.getDM()
+            dmhooks.push_appctx(self.quad_dm, ctx)
+            ctx.set_quad_rhsfunction(self.quad_ts)
+            ctx.set_quad_rhsjacobian(self.quad_ts)
+            ctx.set_quad_rhsjacobianP(self.quad_ts)
+            ctx.set_rhsjacobianP(self.ts)
+        if problem.m:
+            self.ts.setSaveTrajectory()
+            ctx.set_rhsjacobianP(self.ts)
+
+    def _set_problem_eval_funcs(self, ctx, problem, nullspace, nullspace_T, near_nullspace):
+        r"""
+        :arg problem: A :class:`DAEProblem` to solve.
+        :arg ctx: A :class:`_TSContext` that contains the residual evaluations
+        :arg nullspace: an optional :class:`.VectorSpaceBasis` (or
+               :class:`.MixedVectorSpaceBasis`) spanning the null
+               space of the operator.
+        :arg nullspace_T: as for the nullspace, but used to
+               make the right hand side consistent.
+        :arg near_nullspace: as for the nullspace, but used to
+               specify the near nullspace (for multigrid solvers).
+        """
         ctx.set_ifunction(self.ts)
         ctx.set_ijacobian(self.ts)
         ctx.set_nullspace(
@@ -292,32 +351,6 @@ class DAESolver(OptionsManager):
         ctx._nullspace_T = nullspace_T
         ctx._near_nullspace = near_nullspace
 
-        # Set from options now. We need the
-        # DM with an app context in place so that if the DM is active
-        # on a subKSP the context is available.
-        dm = self.ts.getDM()
-        with dmhooks.add_hooks(dm, self, appctx=self._ctx, save=False):
-            self.set_from_options(self.ts)
-
-        if problem.M:
-            self.ts.setSaveTrajectory()
-            # Now create QuadratureTS for integrating the cost integral
-            self.quad_ts = self.ts.createQuadratureTS(forward=True)
-
-            # We want to attach solver._ctx to DM of QuadratureTS
-            # to be able to modify the data attached to the solver
-            # from the RHSFunction, Jacobian, JacobianP
-            self.quad_dm = self.quad_ts.getDM()
-            dmhooks.push_appctx(self.quad_dm, ctx)
-            ctx.set_quad_rhsfunction(self.quad_ts)
-            ctx.set_quad_rhsjacobian(self.quad_ts)
-            ctx.set_quad_rhsjacobianP(self.quad_ts)
-            ctx.set_rhsjacobianP(self.ts)
-            ctx.set_cost_gradients(self.ts)
-
-        # Used for custom grid transfer.
-        self._transfer_operators = ()
-        self._setup = False
 
     def set_transfer_manager(self, manager):
         r"""Set the object that manages transfer between grid levels.
@@ -338,11 +371,21 @@ class DAESolver(OptionsManager):
            If bounds are provided the ``snes_type`` must be set to
            ``vinewtonssls`` or ``vinewtonrsls``.
         """
+
+        self._set_problem_eval_funcs(
+            self._ctx,
+            self._problem,
+            self.nullspace,
+            self.nullspace_T,
+            self.near_nullspace,
+        )
+
         self.ts.setTimeStep(self.dt)
         self.ts.setTime(self.tspan[0])
         self.ts.setStepNumber(0)
         if self._problem.M:
             self.ts.getCostIntegral().getArray()[0] = 0.0
+
         # Make sure appcontext is attached to the DM before we solve.
         dm = self.ts.getDM()
         for dbc in self._problem.dirichlet_bcs():
@@ -381,11 +424,27 @@ class DAESolver(OptionsManager):
         return self._ctx._dMdx, self._ctx._dMdp
 
     def get_cost_function(self):
-        return self.ts.getCostIntegral().getArray()[0]
+        if self._ctx.m:
+            final_cost = assemble(self._ctx.m)
+        else:
+            final_cost = 0.0
+        if self._ctx.M:
+            integrated_cost = self.ts.getCostIntegral().getArray()[0]
+        else:
+            integrated_cost = 0.0
+        return final_cost + integrated_cost
 
     def adjoint_solve(self):
+        self._ctx.set_cost_gradients(self.ts)
         r"""Solve the adjoint problem.
         """
+        self._set_problem_eval_funcs(
+            self._ctx,
+            self._problem,
+            self.nullspace,
+            self.nullspace_T,
+            self.near_nullspace,
+        )
         # Make sure appcontext is attached to the DM before the adjoint solve.
         dm = self.ts.getDM()
 
