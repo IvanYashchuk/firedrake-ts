@@ -1,4 +1,5 @@
 from firedrake.adjoint.blocks import GenericSolveBlock, solve_init_params
+from pyadjoint.tape import stop_annotating
 
 import firedrake_ts
 
@@ -48,23 +49,17 @@ class DAESolverBlock(GenericSolveBlock):
         pass
 
     def prepare_recompute_component(self, inputs, relevant_outputs):
-        return self._replace_form(self.problem.F)
+        return self._replace_recompute_form()
 
     def recompute_component(self, inputs, block_variable, idx, prepared):
-        lhs = prepared[0]
-        rhs = prepared[1]
-        u = prepared[2]
-        bcs = prepared[3]
+        from firedrake import Function
 
-        return self._forward_solve(lhs, rhs, u, bcs)
+        self.problem.F = prepared[0]
+        self.problem.u = prepared[2]
+        self.problem.bcs = prepared[3]
 
-    def _forward_solve(self, lhs, rhs, u, bcs, **kwargs):
-        J = self.problem_J
-        if J is not None:
-            J = self._replace_form(J, u)
-        problem = DAEProblem(lhs, u, udot, tspan, dt, bcs, J=J)
-        solver = DAESolver(problem, **self.solver_kwargs)
-        solver.parameters.update(self.solver_params)
-        solver.solve()
-        return u
+        for dep in self.problem.F.coefficients():
+            print(dep.dat.data)
+
+        return self.solver.solve()
 
