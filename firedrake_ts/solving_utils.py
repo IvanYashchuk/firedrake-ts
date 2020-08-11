@@ -4,7 +4,7 @@ import itertools
 from firedrake import homogenize
 
 from pyop2 import op2
-from firedrake import function, dmhooks
+from firedrake import function, dmhooks, Constant
 from firedrake.exceptions import ConvergenceError
 from firedrake.petsc import PETSc
 from firedrake.formmanipulation import ExtractSubBlock
@@ -643,7 +643,10 @@ class _TSContext(object):
 
     @cached_property
     def _Mjac_p_vec(self):
-        return function.Function(self.p.function_space())
+        if isinstance(self.p, function.Function):
+            return function.Function(self.p.function_space())
+        elif isinstance(self.p, Constant):
+            return Constant(0.0)
 
     @cached_property
     def _Mjac_p(self):
@@ -651,8 +654,14 @@ class _TSContext(object):
         from firedrake.assemble import assemble
 
         local_dofs = self._Mjac_p_vec.dat.data.size
+
+        if isinstance(self.p, function.Function):
+            total_dofs = self._Mjac_p_vec.ufl_function_space().dim()
+        else:
+            total_dofs = 1
+
         djdp_transposed_mat = PETSc.Mat().createDense(
-            [[local_dofs, self._Mjac_p_vec.ufl_function_space().dim()], [1, 1]]
+            [[local_dofs, total_dofs], [1, 1]]
         )
         djdp_transposed_mat.setUp()
 
@@ -671,7 +680,11 @@ class _TSContext(object):
 
     @cached_property
     def _dMdp(self):
-        return function.Function(self.p.function_space())
+
+        if isinstance(self.p, function.Function):
+            return function.Function(self.p.function_space())
+        elif isinstance(self.p, Constant):
+            return Constant(0.0)
 
     @cached_property
     def is_mixed(self):
