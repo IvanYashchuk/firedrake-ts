@@ -435,11 +435,11 @@ class DAESolver(OptionsManager):
         return self._ctx._dMdx, self._ctx._dMdp
 
     def get_cost_function(self):
-        if self._ctx.m:
+        if self._problem.m:
             final_cost = assemble(self._ctx.m)
         else:
             final_cost = 0.0
-        if self._ctx.M:
+        if self._problem.M:
             integrated_cost = self.ts.getCostIntegral().getArray()[0]
         else:
             integrated_cost = 0.0

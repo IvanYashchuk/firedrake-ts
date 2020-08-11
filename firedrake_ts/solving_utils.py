@@ -129,12 +129,6 @@ class _TSContext(object):
         self.appctx = appctx
         self.matfree = matfree
         self.pmatfree = pmatfree
-        self.F = problem.F
-        self.J = problem.J
-
-        self.M = problem.M
-        self.p = problem.p
-        self.m = problem.m
 
         # For Jp to equal J, bc.Jp must equal bc.J for all EquationBC objects.
         Jp_eq_J = problem.Jp is None and all(bc.Jp_eq_J for bc in problem.bcs)
@@ -143,7 +137,7 @@ class _TSContext(object):
             # Need separate pmat if either Jp is different or we want
             # a different pmat type to the mat type.
             if problem.Jp is None:
-                self.Jp = self.J
+                self.Jp = self._problem.J
             else:
                 self.Jp = problem.Jp
         else:
@@ -160,7 +154,10 @@ class _TSContext(object):
             bc if isinstance(bc, DirichletBC) else bc._Jp for bc in problem.bcs
         ]
         self._assemble_residual = create_assembly_callable(
-            self.F, tensor=self._F, bcs=self.bcs_F, form_compiler_parameters=self.fcp
+            self._problem.F,
+            tensor=self._F,
+            bcs=self.bcs_F,
+            form_compiler_parameters=self.fcp,
         )
 
         self._jacobian_assembled = False
@@ -248,13 +245,13 @@ class _TSContext(object):
     def set_cost_gradients(self, ts):
         from firedrake import assemble, derivative
 
-        if self.m:
+        if self._problem.m:
             assemble(
-                derivative(self.m, self._x),
+                derivative(self._problem.m, self._x),
                 tensor=self._dMdx,
                 bcs=homogenize(self.bcs_F),
             )
-            assemble(derivative(self.m, self.p), tensor=self._dMdp)
+            assemble(derivative(self._problem.m, self._problem.p), tensor=self._dMdp)
         with self._dMdx.dat.vec as dMdu_vec, self._dMdp.dat.vec as dMdp_vec:
             ts.setCostGradients(dMdu_vec, dMdp_vec)
 
@@ -473,7 +470,7 @@ class _TSContext(object):
             X.copy(v)
         ctx._time.assign(t)
 
-        j_value = assemble(ctx.M)
+        j_value = assemble(ctx._problem.M)
         R.set(j_value)
 
     @staticmethod
@@ -499,7 +496,9 @@ class _TSContext(object):
         ctx._time.assign(t)
 
         assemble(
-            derivative(ctx.M, ctx._x), tensor=ctx._Mjac_x_vec, bcs=homogenize(ctx.bcs_J)
+            derivative(ctx._problem.M, ctx._x),
+            tensor=ctx._Mjac_x_vec,
+            bcs=homogenize(ctx.bcs_J),
         )
         Jmat_array = J.getDenseArray()
         with ctx._Mjac_x_vec.dat.vec_ro as v:
@@ -528,7 +527,7 @@ class _TSContext(object):
             X.copy(v)
         ctx._time.assign(t)
 
-        assemble(derivative(ctx.M, ctx.p), tensor=ctx._Mjac_p_vec)
+        assemble(derivative(ctx._problem.M, ctx._problem.p), tensor=ctx._Mjac_p_vec)
         Jmat_array = J.getDenseArray()
         with ctx._Mjac_p_vec.dat.vec_ro as v:
             Jmat_array[:, 0] = v.array[:]
@@ -553,7 +552,7 @@ class _TSContext(object):
         with ctx._x.dat.vec_wo as v:
             X.copy(v)
 
-        dFdp = derivative(-ctx.F, ctx.p)
+        dFdp = derivative(-ctx._problem.F, ctx._problem.p)
 
         assemble(dFdp, tensor=ctx._dFdp)
 
@@ -598,7 +597,7 @@ class _TSContext(object):
         from firedrake.assemble import allocate_matrix
 
         return allocate_matrix(
-            self.J,
+            self._problem.J,
             bcs=self.bcs_J,
             form_compiler_parameters=self.fcp,
             mat_type=self.mat_type,
@@ -611,7 +610,7 @@ class _TSContext(object):
         from firedrake.assemble import create_assembly_callable
 
         return create_assembly_callable(
-            self.J,
+            self._problem.J,
             tensor=self._jac,
             bcs=self.bcs_J,
             form_compiler_parameters=self.fcp,
@@ -626,7 +625,7 @@ class _TSContext(object):
     # We do the same for the jacobian w.r.t. the control
     @cached_property
     def _Mjac_x_vec(self):
-        return function.Function(self.F.arguments()[0].function_space())
+        return function.Function(self._problem.F.arguments()[0].function_space())
 
     @cached_property
     def _Mjac_x(self):
@@ -643,9 +642,9 @@ class _TSContext(object):
 
     @cached_property
     def _Mjac_p_vec(self):
-        if isinstance(self.p, function.Function):
-            return function.Function(self.p.function_space())
-        elif isinstance(self.p, Constant):
+        if isinstance(self._problem.p, function.Function):
+            return function.Function(self._problem.p.function_space())
+        elif isinstance(self._problem.p, Constant):
             return Constant(0.0)
 
     @cached_property
@@ -655,7 +654,7 @@ class _TSContext(object):
 
         local_dofs = self._Mjac_p_vec.dat.data.size
 
-        if isinstance(self.p, function.Function):
+        if isinstance(self._problem.p, function.Function):
             total_dofs = self._Mjac_p_vec.ufl_function_space().dim()
         else:
             total_dofs = 1
@@ -672,18 +671,18 @@ class _TSContext(object):
         from firedrake import derivative
         from firedrake.assemble import assemble
 
-        return assemble(derivative(-self.F, self.p))
+        return assemble(derivative(-self._problem.F, self._problem.p))
 
     @cached_property
     def _dMdx(self):
-        return function.Function(self.F.arguments()[0].function_space())
+        return function.Function(self._problem.F.arguments()[0].function_space())
 
     @cached_property
     def _dMdp(self):
 
-        if isinstance(self.p, function.Function):
-            return function.Function(self.p.function_space())
-        elif isinstance(self.p, Constant):
+        if isinstance(self._problem.p, function.Function):
+            return function.Function(self._problem.p.function_space())
+        elif isinstance(self._problem.p, Constant):
             return Constant(0.0)
 
     @cached_property
@@ -720,4 +719,4 @@ class _TSContext(object):
 
     @cached_property
     def _F(self):
-        return function.Function(self.F.arguments()[0].function_space())
+        return function.Function(self._problem.F.arguments()[0].function_space())
