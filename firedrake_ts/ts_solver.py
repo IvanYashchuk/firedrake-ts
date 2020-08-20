@@ -392,6 +392,8 @@ class DAESolver(OptionsManager):
             self.near_nullspace,
         )
 
+        self._ctx.create_assemble_residual()
+
         self.ts.setTimeStep(self.dt)
         self.ts.setTime(self.tspan[0])
         self.ts.setStepNumber(0)
