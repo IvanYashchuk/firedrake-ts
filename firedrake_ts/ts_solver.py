@@ -14,6 +14,7 @@ from firedrake_ts.solving_utils import check_ts_convergence, _TSContext
 from firedrake_ts.adjoint import DAESolverMixin, DAEProblemMixin
 
 
+
 def check_forms(F, J, Jp, M, m):
     if not isinstance(F, (ufl.Form, slate.TensorBase)):
         raise TypeError(
@@ -296,17 +297,6 @@ class DAESolver(OptionsManager):
             ctx, problem, nullspace, nullspace_T, near_nullspace
         )
 
-        # Set from options now. We need the
-        # DM with an app context in place so that if the DM is active
-        # on a subKSP the context is available.
-        dm = self.ts.getDM()
-        with dmhooks.add_hooks(dm, self, appctx=self._ctx, save=False):
-            self.set_from_options(self.ts)
-
-        # Used for custom grid transfer.
-        self._transfer_operators = ()
-        self._setup = False
-
         if problem.M:
             self.ts.setSaveTrajectory()
             # Now create QuadratureTS for integrating the cost integral
@@ -324,6 +314,17 @@ class DAESolver(OptionsManager):
         if problem.m:
             self.ts.setSaveTrajectory()
             ctx.set_rhsjacobianP(self.ts)
+
+        # Set from options now. We need the
+        # DM with an app context in place so that if the DM is active
+        # on a subKSP the context is available.
+        dm = self.ts.getDM()
+        with dmhooks.add_hooks(dm, self, appctx=self._ctx, save=False):
+            self.set_from_options(self.ts)
+
+        # Used for custom grid transfer.
+        self._transfer_operators = ()
+        self._setup = False
 
     def _set_problem_eval_funcs(
         self, ctx, problem, nullspace, nullspace_T, near_nullspace
