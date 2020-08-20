@@ -449,9 +449,9 @@ class DAESolver(OptionsManager):
         return final_cost + integrated_cost
 
     def adjoint_solve(self):
-        self._ctx.set_cost_gradients(self.ts)
         r"""Solve the adjoint problem.
         """
+        self._ctx.set_cost_gradients(self.ts)
         self._set_problem_eval_funcs(
             self._ctx,
             self._problem,
