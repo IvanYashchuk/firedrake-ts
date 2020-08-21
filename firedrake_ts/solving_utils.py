@@ -1,3 +1,5 @@
+from firedrake import assemble
+from firedrake.functionspace import FunctionSpace
 import numpy
 
 import itertools
@@ -20,6 +22,8 @@ def _make_reasons(reasons):
 
 
 TSReasons = _make_reasons(PETSc.TS.ConvergedReason())
+
+print = lambda x: PETSc.Sys.Print(x)
 
 
 def check_ts_convergence(ts):
@@ -88,7 +92,6 @@ class _TSContext(object):
         options_prefix=None,
         transfer_manager=None,
     ):
-        from firedrake.assemble import create_assembly_callable
         from firedrake.bcs import DirichletBC
 
         if pmat_type is None:
@@ -107,14 +110,6 @@ class _TSContext(object):
         self._post_function_callback = post_function_callback
 
         self.fcp = problem.form_compiler_parameters
-        # Function to hold current guess
-        self._x = problem.u
-        # Function to hold time derivative
-        self._xdot = problem.udot
-        # Constant to hold time shift value
-        self._shift = problem.shift
-        # Constant to hold current time value
-        self._time = problem.time
 
         if appctx is None:
             appctx = {}
@@ -123,7 +118,7 @@ class _TSContext(object):
         # Now we don't have a temporary state inside the snes
         # context we could just require the user to pass in the
         # full state on the outside.
-        appctx.setdefault("state", self._x)
+        appctx.setdefault("state", self._problem.u)
         appctx.setdefault("form_compiler_parameters", self.fcp)
 
         self.appctx = appctx
@@ -153,12 +148,8 @@ class _TSContext(object):
         self.bcs_Jp = [
             bc if isinstance(bc, DirichletBC) else bc._Jp for bc in problem.bcs
         ]
-        self._assemble_residual = create_assembly_callable(
-            self._problem.F,
-            tensor=self._F,
-            bcs=self.bcs_F,
-            form_compiler_parameters=self.fcp,
-        )
+
+        self.create_assemble_residual()
 
         self._jacobian_assembled = False
         self._splits = {}
@@ -169,6 +160,16 @@ class _TSContext(object):
         self._nullspace_T = None
         self._near_nullspace = None
         self._transfer_manager = transfer_manager
+
+    def create_assemble_residual(self):
+        from firedrake.assemble import create_assembly_callable
+
+        self._assemble_residual = create_assembly_callable(
+            self._problem.F,
+            tensor=self._F,
+            bcs=self.bcs_F,
+            form_compiler_parameters=self.fcp,
+        )
 
     @property
     def transfer_manager(self):
@@ -247,7 +248,7 @@ class _TSContext(object):
 
         if self._problem.m:
             assemble(
-                derivative(self._problem.m, self._x),
+                derivative(self._problem.m, self._problem.u),
                 tensor=self._dMdx,
                 bcs=homogenize(self.bcs_F),
             )
@@ -379,18 +380,30 @@ class _TSContext(object):
         """
         dm = ts.getDM()
         ctx = dmhooks.get_appctx(dm)
-        # X may not be the same vector as the vec behind self._x, so
+        # X may not be the same vector as the vec behind self._problem.u, so
         # copy guess in from X.
-        with ctx._x.dat.vec_wo as v:
+        with ctx._problem.u.dat.vec_wo as v:
             X.copy(v)
-        with ctx._xdot.dat.vec_wo as v:
+        with ctx._problem.udot.dat.vec_wo as v:
             Xdot.copy(v)
-        ctx._time.assign(t)
+        ctx._problem.time.assign(t)
 
         if ctx._pre_function_callback is not None:
             ctx._pre_function_callback(X, Xdot)
 
         ctx._assemble_residual()
+        from firedrake import assemble
+
+        print("problem solution u")
+        print(ctx._problem.u.dat.data)
+        # print("problem solution udot")
+        # print(ctx._problem.udot.dat.data)
+        print("solution")
+        print(X.array)
+        # print("velocity")
+        # print(Xdot.array)
+        # print("residual ctx")
+        # print(ctx._F.dat.data)
 
         if ctx._post_function_callback is not None:
             with ctx._F.dat.vec as F_:
@@ -400,6 +413,9 @@ class _TSContext(object):
         # residual out to F.
         with ctx._F.dat.vec_ro as v:
             v.copy(F)
+
+        # print("residual")
+        # print(F.array)
 
     @staticmethod
     def form_jacobian(ts, t, X, Xdot, shift, J, P):
@@ -424,19 +440,31 @@ class _TSContext(object):
             return
         ctx._jacobian_assembled = True
 
-        # X may not be the same vector as the vec behind self._x, so
+        # X may not be the same vector as the vec behind self._problem.u, so
         # copy guess in from X.
-        with ctx._x.dat.vec_wo as v:
+        with ctx._problem.u.dat.vec_wo as v:
             X.copy(v)
-        with ctx._xdot.dat.vec_wo as v:
+        with ctx._problem.udot.dat.vec_wo as v:
             Xdot.copy(v)
-        ctx._time.assign(t)
+        ctx._problem.time.assign(t)
 
         if ctx._pre_jacobian_callback is not None:
             ctx._pre_jacobian_callback(X, Xdot)
 
-        ctx._shift.assign(shift)
+        ctx._problem.shift.assign(shift)
         ctx._assemble_jac()
+        from firedrake import assemble
+
+        # assemble(
+        #    ctx._problem.J,
+        #    tensor=ctx._jac,
+        #    bcs=ctx.bcs_J,
+        #    form_compiler_parameters=ctx.fcp,
+        #    mat_type=ctx.mat_type,
+        # )
+
+        # print("jacobian")
+        #        print(ctx._jac.petscmat[:, :])
 
         if ctx._post_jacobian_callback is not None:
             ctx._post_jacobian_callback(X, Xdot, J)
@@ -464,11 +492,17 @@ class _TSContext(object):
 
         dm = ts.getDM()
         ctx = dmhooks.get_appctx(dm)
-        # X may not be the same vector as the vec behind self._x, so
+        # X may not be the same vector as the vec behind self._problem.u, so
         # copy guess in from X.
-        with ctx._x.dat.vec_wo as v:
+        with ctx._problem.u.dat.vec_wo as v:
             X.copy(v)
-        ctx._time.assign(t)
+        ctx._problem.time.assign(t)
+
+        # print("solution inside cost integral")
+        #        print(X.array)
+
+        # print("problem solution inside cost integral u")
+        #        print(ctx._problem.M.coefficients()[0].dat.data)
 
         j_value = assemble(ctx._problem.M)
         R.set(j_value)
@@ -489,14 +523,14 @@ class _TSContext(object):
 
         dm = ts.getDM()
         ctx = dmhooks.get_appctx(dm)
-        # X may not be the same vector as the vec behind self._x, so
+        # X may not be the same vector as the vec behind self._problem.u, so
         # copy guess in from X.
-        with ctx._x.dat.vec_wo as v:
+        with ctx._problem.u.dat.vec_wo as v:
             X.copy(v)
-        ctx._time.assign(t)
+        ctx._problem.time.assign(t)
 
         assemble(
-            derivative(ctx._problem.M, ctx._x),
+            derivative(ctx._problem.M, ctx._problem.u),
             tensor=ctx._Mjac_x_vec,
             bcs=homogenize(ctx.bcs_J),
         )
@@ -521,11 +555,11 @@ class _TSContext(object):
 
         dm = ts.getDM()
         ctx = dmhooks.get_appctx(dm)
-        # X may not be the same vector as the vec behind self._x, so
+        # X may not be the same vector as the vec behind self._problem.u, so
         # copy guess in from X.
-        with ctx._x.dat.vec_wo as v:
+        with ctx._problem.u.dat.vec_wo as v:
             X.copy(v)
-        ctx._time.assign(t)
+        ctx._problem.time.assign(t)
 
         assemble(derivative(ctx._problem.M, ctx._problem.p), tensor=ctx._Mjac_p_vec)
         Jmat_array = J.getDenseArray()
@@ -548,8 +582,8 @@ class _TSContext(object):
 
         dm = ts.getDM()
         ctx = dmhooks.get_appctx(dm)
-        ctx._time.assign(t)
-        with ctx._x.dat.vec_wo as v:
+        ctx._problem.time.assign(t)
+        with ctx._problem.u.dat.vec_wo as v:
             X.copy(v)
 
         dFdp = derivative(-ctx._problem.F, ctx._problem.p)
@@ -579,12 +613,14 @@ class _TSContext(object):
 
         fine = ctx._fine
         if fine is not None:
-            manager = dmhooks.get_transfer_operators(fine._x.function_space().dm)
-            manager.inject(fine._x, ctx._x)
+            manager = dmhooks.get_transfer_operators(
+                fine._problem.u.function_space().dm
+            )
+            manager.inject(fine._problem.u, ctx._problem.u)
 
             for bc in itertools.chain(*ctx._problem.bcs):
                 if isinstance(bc, DirichletBC):
-                    bc.apply(ctx._x)
+                    bc.apply(ctx._problem.u)
 
         ctx._assemble_jac()
 
@@ -645,7 +681,9 @@ class _TSContext(object):
         if isinstance(self._problem.p, function.Function):
             return function.Function(self._problem.p.function_space())
         elif isinstance(self._problem.p, Constant):
-            return Constant(0.0)
+            return function.Function(
+                FunctionSpace(self._problem.u.ufl_domain(), "Real", 0)
+            )
 
     @cached_property
     def _Mjac_p(self):
@@ -683,7 +721,9 @@ class _TSContext(object):
         if isinstance(self._problem.p, function.Function):
             return function.Function(self._problem.p.function_space())
         elif isinstance(self._problem.p, Constant):
-            return Constant(0.0)
+            return function.Function(
+                FunctionSpace(self._problem.u.ufl_domain(), "Real", 0)
+            )
 
     @cached_property
     def is_mixed(self):

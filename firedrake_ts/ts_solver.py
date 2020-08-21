@@ -14,7 +14,6 @@ from firedrake_ts.solving_utils import check_ts_convergence, _TSContext
 from firedrake_ts.adjoint import DAESolverMixin, DAEProblemMixin
 
 
-
 def check_forms(F, J, Jp, M, m):
     if not isinstance(F, (ufl.Form, slate.TensorBase)):
         raise TypeError(
@@ -393,12 +392,6 @@ class DAESolver(OptionsManager):
         )
 
         self._ctx.create_assemble_residual()
-
-        self.ts.setTimeStep(self.dt)
-        self.ts.setTime(self.tspan[0])
-        self.ts.setStepNumber(0)
-        if self._problem.M:
-            self.ts.getCostIntegral().getArray()[0] = 0.0
 
         # Make sure appcontext is attached to the DM before we solve.
         dm = self.ts.getDM()
