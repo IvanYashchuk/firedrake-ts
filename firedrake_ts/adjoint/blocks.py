@@ -37,6 +37,8 @@ class DAESolverBlock(GenericSolveBlock):
         # Each block creates and stores its own DAESolver to reuse it with
         # the recompute() and evaluate_adj() operations
         self.problem = firedrake_ts.DAEProblem(F, u, udot, tspan, dt, bcs=bcs, M=M, p=p)
+        self.pfunc = p
+        self.pfunc_copy = p.copy(deepcopy=True)
         self.solver = firedrake_ts.DAESolver(self.problem, **self.solver_kwargs)
         self.solver.parameters.update(self.solver_params)
 
@@ -58,13 +60,25 @@ class DAESolverBlock(GenericSolveBlock):
         self.problem.udot = prepared[3]
         self.problem.bcs_F = prepared[4]
         self.problem.M = prepared[5]
+        self.problem.p = prepared[6]
 
         self.solver.adjoint_solve()
         dJdu, dJdf = self.solver.get_cost_gradients()
 
         return input * dJdf
 
-    def _replace_form(self, form, func=None, velfunc=None):
+    def prepare_recompute_component(self, inputs, relevant_outputs):
+        pass
+
+    def _replace_map(self, form):
+        replace_coeffs = {}
+        for block_variable in self.get_dependencies():
+            coeff = block_variable.output
+            if coeff in form.coefficients():
+                replace_coeffs[coeff] = block_variable.saved_output
+        return replace_coeffs
+
+    def _replace_form(self, form, func=None, velfunc=None, pfunc=None):
         """Replace the form coefficients with checkpointed values
 
         func represents the initial guess if relevant.
@@ -76,21 +90,27 @@ class DAESolverBlock(GenericSolveBlock):
         if velfunc is not None and self.udot in replace_map:
             self.backend.Function.assign(velfunc, replace_map[self.udot])
             replace_map[self.udot] = velfunc
+
+        if pfunc is not None and self.pfunc in replace_map:
+            self.backend.Function.assign(pfunc, replace_map[self.pfunc])
+            replace_map[self.pfunc] = pfunc
+
         return ufl.replace(form, replace_map)
 
     def _replace_recompute_form(self):
         func = self._create_initial_guess()
         velfunc = self._create_initial_guess()
+        pfunc = self.pfunc_copy
 
         bcs = self._recover_bcs()
-        lhs = self._replace_form(self.lhs, func=func, velfunc=velfunc)
+        lhs = self._replace_form(self.lhs, func=func, velfunc=velfunc, pfunc=pfunc)
         rhs = 0
         if self.linear:
             rhs = self._replace_form(self.rhs)
 
-        M = self._replace_form(self.M, func=func, velfunc=velfunc)
+        M = self._replace_form(self.M, func=func, velfunc=velfunc, pfunc=pfunc)
 
-        return lhs, rhs, func, velfunc, bcs, M
+        return lhs, rhs, func, velfunc, bcs, M, pfunc
 
     def recompute_component(self, inputs, block_variable, idx, prepared):
         from firedrake import Function
@@ -102,13 +122,7 @@ class DAESolverBlock(GenericSolveBlock):
         self.problem.udot = prepared[3]
         self.problem.bcs_F = prepared[4]
         self.problem.M = prepared[5]
+        self.problem.p = prepared[6]
 
-        # Necessary to reset the problem as solver.solve() starts from the last time step used.
-        self.solver.ts.setTimeStep(self.solver.dt)
-        self.solver.ts.setTime(self.solver.tspan[0])
-        self.solver.ts.setStepNumber(0)
-        if self.solver._problem.M:
-            self.solver.ts.getCostIntegral().getArray()[0] = 0.0
-
-        return self.solver.solve()
+        return self.solver.solve(self.problem.u)
 
