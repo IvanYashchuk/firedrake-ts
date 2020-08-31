@@ -396,17 +396,6 @@ class _TSContext(object):
         ctx._assemble_residual()
         from firedrake import assemble
 
-        print("problem solution u")
-        print(ctx._problem.u.dat.data)
-        # print("problem solution udot")
-        # print(ctx._problem.udot.dat.data)
-        print("solution")
-        print(X.array)
-        # print("velocity")
-        # print(Xdot.array)
-        # print("residual ctx")
-        # print(ctx._F.dat.data)
-
         if ctx._post_function_callback is not None:
             with ctx._F.dat.vec as F_:
                 ctx._post_function_callback(X, Xdot, F_)
@@ -415,9 +404,6 @@ class _TSContext(object):
         # residual out to F.
         with ctx._F.dat.vec_ro as v:
             v.copy(F)
-
-        # print("residual")
-        # print(F.array)
 
     @staticmethod
     def form_jacobian(ts, t, X, Xdot, shift, J, P):
@@ -457,16 +443,6 @@ class _TSContext(object):
         ctx._assemble_jac()
         from firedrake import assemble
 
-        # assemble(
-        #    ctx._problem.J,
-        #    tensor=ctx._jac,
-        #    bcs=ctx.bcs_J,
-        #    form_compiler_parameters=ctx.fcp,
-        #    mat_type=ctx.mat_type,
-        # )
-
-        # print("jacobian")
-        #        print(ctx._jac.petscmat[:, :])
 
         if ctx._post_jacobian_callback is not None:
             ctx._post_jacobian_callback(X, Xdot, J)
@@ -500,11 +476,6 @@ class _TSContext(object):
             X.copy(v)
         ctx._problem.time.assign(t)
 
-        # print("solution inside cost integral")
-        #        print(X.array)
-
-        # print("problem solution inside cost integral u")
-        #        print(ctx._problem.M.coefficients()[0].dat.data)
 
         j_value = assemble(ctx._problem.M)
         R.set(j_value)
