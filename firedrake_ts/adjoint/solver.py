@@ -4,6 +4,7 @@ from pyadjoint.tape import (
     annotate_tape,
     no_annotations,
 )
+from functools import wraps
 from pyadjoint.overloaded_type import create_overloaded_object
 
 from firedrake_ts.adjoint.blocks import DAESolverBlock
@@ -13,6 +14,7 @@ class DAEProblemMixin:
     @staticmethod
     def _ad_annotate_init(init):
         @no_annotations
+        @wraps(init)
         def wrapper(self, *args, **kwargs):
             init(self, *args, **kwargs)
             self._ad_F = self.F
@@ -42,6 +44,7 @@ class DAESolverMixin:
     @staticmethod
     def _ad_annotate_init(init):
         @no_annotations
+        @wraps(init)
         def wrapper(self, problem, *args, **kwargs):
             init(self, problem, *args, **kwargs)
             self._ad_problem = problem
@@ -52,7 +55,8 @@ class DAESolverMixin:
 
     @staticmethod
     def _ad_annotate_solve(solve):
-        def wrapper(self, **kwargs):
+        @wraps(solve)
+        def wrapper(self, *args, **kwargs):
             """To disable the annotation, just pass :py:data:`annotate=False` to this routine, and it acts exactly like the
             Firedrake solve call. This is useful in cases where the solve is known to be irrelevant or diagnostic
             for the purposes of the adjoint computation (such as projecting fields to other function spaces
@@ -81,7 +85,7 @@ class DAESolverMixin:
                 tape.add_block(block)
 
             with stop_annotating():
-                out = solve(self, **kwargs)
+                out = solve(self, *args, **kwargs)
 
             if annotate:
                 if problem.M:
