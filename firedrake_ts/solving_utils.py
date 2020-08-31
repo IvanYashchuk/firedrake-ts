@@ -254,6 +254,8 @@ class _TSContext(object):
             )
             assemble(derivative(self._problem.m, self._problem.p), tensor=self._dMdp)
         with self._dMdx.dat.vec as dMdu_vec, self._dMdp.dat.vec as dMdp_vec:
+            dMdu_vec.zeroEntries()
+            dMdp_vec.zeroEntries()
             ts.setCostGradients(dMdu_vec, dMdp_vec)
 
     def set_nullspace(self, nullspace, ises=None, transpose=False, near=False):
