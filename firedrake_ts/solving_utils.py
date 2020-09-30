@@ -4,9 +4,10 @@ import numpy
 
 import itertools
 from firedrake import homogenize
+from pyadjoint import block_variable
 
 from pyop2 import op2
-from firedrake import function, dmhooks, Constant
+from firedrake import function, dmhooks, Constant, TrialFunction
 from firedrake.exceptions import ConvergenceError
 from firedrake.petsc import PETSc
 from firedrake.formmanipulation import ExtractSubBlock
@@ -160,6 +161,24 @@ class _TSContext(object):
         self._nullspace_T = None
         self._near_nullspace = None
         self._transfer_manager = transfer_manager
+
+        # Cache vectors for assembly of partial derivatives
+        if hasattr(self._problem, "dependencies"):
+            self._Mjac_p_vecs = {}
+            self._dMdp_vecs = {}
+            for block_variable in self._problem.dependencies:
+                coeff = block_variable.output
+                if isinstance(coeff, function.Function):
+                    self._Mjac_p_vecs[coeff] = function.Function(coeff.function_space())
+                    self._dMdp_vecs[coeff] = function.Function(coeff.function_space())
+                elif isinstance(coeff, Constant):
+                    mesh = self._problem.F.ufl_domain()
+                    self._Mjac_p_vecs[coeff] = function.Function(
+                        coeff._ad_function_space(mesh)
+                    )
+                    self._dMdp_vecs[coeff] = function.Function(
+                        coeff._ad_function_space(mesh)
+                    )
 
     def create_assemble_residual(self):
         from firedrake.assemble import create_assembly_callable
@@ -443,7 +462,6 @@ class _TSContext(object):
         ctx._assemble_jac()
         from firedrake import assemble
 
-
         if ctx._post_jacobian_callback is not None:
             ctx._post_jacobian_callback(X, Xdot, J)
 
@@ -475,7 +493,6 @@ class _TSContext(object):
         with ctx._problem.u.dat.vec_wo as v:
             X.copy(v)
         ctx._problem.time.assign(t)
-
 
         j_value = assemble(ctx._problem.M)
         R.set(j_value)
@@ -533,6 +550,21 @@ class _TSContext(object):
         with ctx._problem.u.dat.vec_wo as v:
             X.copy(v)
         ctx._problem.time.assign(t)
+
+        if hasattr(ctx._problem, "dependencies"):
+            for block_variable in ctx._problem.dependencies:
+                coeff = block_variable.output
+                c_rep = block_variable.saved_output
+                if isinstance(coeff, function.Function):
+                    trial_function = TrialFunction(coeff.function_space())
+                elif isinstance(coeff, Constant):
+                    mesh = ctx._problem.M.ufl_domain()
+                    trial_function = TrialFunction(coeff._ad_function_space(mesh))
+
+                assemble(
+                    derivative(ctx._problem.M, c_rep, trial_function),
+                    tensor=ctx._Mjac_p_vecs[coeff],
+                )
 
         assemble(derivative(ctx._problem.M, ctx._problem.p), tensor=ctx._Mjac_p_vec)
         Jmat_array = J.getDenseArray()

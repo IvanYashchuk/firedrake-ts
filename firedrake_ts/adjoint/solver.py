@@ -1,3 +1,4 @@
+import copy
 from pyadjoint.tape import (
     get_working_tape,
     stop_annotating,
@@ -6,6 +7,7 @@ from pyadjoint.tape import (
 )
 from functools import wraps
 from pyadjoint.overloaded_type import create_overloaded_object
+from ufl import replace
 
 from firedrake_ts.adjoint.blocks import DAESolverBlock
 
@@ -39,6 +41,9 @@ class DAEProblemMixin:
 
         return wrapper
 
+    def _ad_count_map_update(self, updated_ad_count_map):
+        self._ad_count_map = updated_ad_count_map
+
 
 class DAESolverMixin:
     @staticmethod
@@ -50,6 +55,7 @@ class DAESolverMixin:
             self._ad_problem = problem
             self._ad_args = args
             self._ad_kwargs = kwargs
+            self._ad_tsvs = None
 
         return wrapper
 
@@ -82,6 +88,19 @@ class DAESolverMixin:
                     solver_kwargs=self._ad_kwargs,
                     **sb_kwargs
                 )
+
+                if not self._ad_tsvs:
+                    from firedrake_ts import DAESolver
+
+                    # Save the dependencies here so we can get the partial derivatives inside PETSc callbacks
+                    self._ad_tsvs = DAESolver(
+                        self._ad_problem_clone(
+                            self._ad_problem, block.get_dependencies()
+                        ),
+                        **self._ad_kwargs
+                    )
+
+                block._ad_tsvs = self._ad_tsvs
                 tape.add_block(block)
 
             with stop_annotating():
@@ -97,3 +116,66 @@ class DAESolverMixin:
             return out
 
         return wrapper
+
+    @no_annotations
+    def _ad_problem_clone(self, problem, dependencies):
+        """Replaces every coefficient in the residual and jacobian with a deepcopy to return
+        a clone of the original NonlinearVariationalProblem instance. We'll be modifying the
+        numerical values of the coefficients in the residual and jacobian, so in order not to
+        affect the user-defined self._ad_problem.F, self._ad_problem.J and self._ad_problem.u
+        expressions, we'll instead create clones of them.
+        """
+        from firedrake_ts import DAEProblem
+        from firedrake import Constant
+
+        F_replace_map = {}
+        J_replace_map = {}
+        M_replace_map = {}
+
+        F_coefficients = problem.F.coefficients()
+        J_coefficients = problem.J.coefficients()
+        M_coefficients = problem.M.coefficients()
+
+        _ad_count_map = {}
+        for block_variable in dependencies:
+            coeff = block_variable.output
+            if coeff in F_coefficients and coeff not in F_replace_map:
+                if isinstance(coeff, Constant):
+                    F_replace_map[coeff] = copy.deepcopy(coeff)
+                else:
+                    F_replace_map[coeff] = coeff.copy(deepcopy=True)
+                _ad_count_map[F_replace_map[coeff]] = coeff.count()
+
+            if coeff in J_coefficients and coeff not in J_replace_map:
+                if coeff in F_replace_map:
+                    J_replace_map[coeff] = F_replace_map[coeff]
+                elif isinstance(coeff, Constant):
+                    J_replace_map[coeff] = copy.deepcopy(coeff)
+                else:
+                    J_replace_map[coeff] = coeff.copy()
+                _ad_count_map[J_replace_map[coeff]] = coeff.count()
+
+            if coeff in M_coefficients and coeff not in M_replace_map:
+                if coeff in F_replace_map:
+                    M_replace_map[coeff] = F_replace_map[coeff]
+                elif isinstance(coeff, Constant):
+                    M_replace_map[coeff] = copy.deepcopy(coeff)
+                else:
+                    M_replace_map[coeff] = coeff.copy()
+                _ad_count_map[M_replace_map[coeff]] = coeff.count()
+
+        tsvp = DAEProblem(
+            replace(problem.F, F_replace_map),
+            F_replace_map[problem.u],
+            F_replace_map[problem.udot],
+            problem._ad_tspan,
+            problem._ad_dt,
+            bcs=problem.bcs,
+            p=problem.p,
+            M=replace(problem.M, M_replace_map),
+            J=replace(problem.J, J_replace_map),
+        )
+        tsvp._ad_count_map_update(_ad_count_map)
+
+        tsvp.dependencies = dependencies  # TODO Better way?
+        return tsvp

@@ -1,4 +1,6 @@
+import copy
 from firedrake.adjoint.blocks import GenericSolveBlock, solve_init_params
+from firedrake import Constant
 from pyadjoint.tape import stop_annotating
 import ufl
 
@@ -38,7 +40,11 @@ class DAESolverBlock(GenericSolveBlock):
         # the recompute() and evaluate_adj() operations
         self.problem = firedrake_ts.DAEProblem(F, u, udot, tspan, dt, bcs=bcs, M=M, p=p)
         self.pfunc = p
-        self.pfunc_copy = p.copy(deepcopy=True)
+        if isinstance(p, Constant):
+            self.pfunc_copy = copy.deepcopy(p)
+        else:
+            self.pfunc_copy = p.copy(deepcopy=True)
+
         self.solver = firedrake_ts.DAESolver(self.problem, **self.solver_kwargs)
         self.solver.parameters.update(self.solver_params)
 
@@ -65,6 +71,8 @@ class DAESolverBlock(GenericSolveBlock):
         self.solver.adjoint_solve()
         dJdu, dJdf = self.solver.get_cost_gradients()
 
+        self._ad_tsvs.adjoint_solve()
+        self._ad_tsvs.get_cost_gradients()
         return input * dJdf
 
     def prepare_recompute_component(self, inputs, relevant_outputs):
@@ -124,5 +132,48 @@ class DAESolverBlock(GenericSolveBlock):
         self.problem.M = prepared[5]
         self.problem.p = prepared[6]
 
+        self._ad_tsvs_replace_forms()
+        self._ad_tsvs.parameters.update(self.solver_params)
+        self._ad_tsvs.solve(self._ad_tsvs._problem.u)
+
         return self.solver.solve(self.problem.u)
+
+    def _ad_assign_map(self, form):
+        count_map = self._ad_tsvs._problem._ad_count_map
+        assign_map = {}
+        form_ad_count_map = dict(
+            (count_map[coeff], coeff) for coeff in form.coefficients()
+        )
+        for block_variable in self.get_dependencies():
+            coeff = block_variable.output
+            if isinstance(coeff, (self.backend.Coefficient, self.backend.Constant)):
+                coeff_count = coeff.count()
+                if coeff_count in form_ad_count_map:
+                    assign_map[
+                        form_ad_count_map[coeff_count]
+                    ] = block_variable.saved_output
+        return assign_map
+
+    def _ad_assign_coefficients(self, form, func=None, velfunc=None):
+        assign_map = self._ad_assign_map(form)
+        if func is not None and self._ad_tsvs._problem.u in assign_map:
+            self.backend.Function.assign(func, assign_map[self._ad_tsvs._problem.u])
+            assign_map[self._ad_tsvs._problem.u] = func
+
+        if velfunc is not None and self._ad_tsvs._problem.udot in assign_map:
+            self.backend.Function.assign(
+                velfunc, assign_map[self._ad_tsvs._problem.udot]
+            )
+            assign_map[self._ad_tsvs._problem.udot] = velfunc
+
+        for coeff, value in assign_map.items():
+            coeff.assign(value)
+
+    def _ad_tsvs_replace_forms(self):
+        problem = self._ad_tsvs._problem
+        func = self.backend.Function(problem.u.function_space())
+        velfunc = self.backend.Function(problem.u.function_space())
+        self._ad_assign_coefficients(problem.F, func, velfunc)
+        self._ad_assign_coefficients(problem.M, func, velfunc)
+        self._ad_assign_coefficients(problem.J)
 

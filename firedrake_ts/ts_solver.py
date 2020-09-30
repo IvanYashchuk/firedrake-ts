@@ -58,7 +58,7 @@ def is_form_consistent(is_linear, bcs):
         )
 
 
-class DAEProblem(object):
+class DAEProblem(DAEProblemMixin):
     r"""Nonlinear variational problem in DAE form F(t, u, udot; v) = 0."""
 
     @DAEProblemMixin._ad_annotate_init
@@ -163,7 +163,7 @@ class DAEProblem(object):
         return self.u.function_space().dm
 
 
-class DAESolver(OptionsManager):
+class DAESolver(OptionsManager, DAESolverMixin):
     r"""Solves a :class:`DAEProblem`."""
 
     @DAESolverMixin._ad_annotate_init
