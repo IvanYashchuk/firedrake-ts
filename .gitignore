@@ -130,3 +130,6 @@ dmypy.json
 
 # TS history data
 **/TS*
+# Vscode settings
+.vscode/
+*.code-workspace
