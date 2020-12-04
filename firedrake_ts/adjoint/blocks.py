@@ -36,6 +36,10 @@ class DAESolverBlock(GenericSolveBlock):
             for coeff in self.problem_J.coefficients():
                 self.add_dependency(coeff, no_duplicates=True)
 
+        if self.M is not None:
+            for coeff in self.M.coefficients():
+                self.add_dependency(coeff, no_duplicates=True)
+
         # Each block creates and stores its own DAESolver to reuse it with
         # the recompute() and evaluate_adj() operations
         self.problem = firedrake_ts.DAEProblem(F, u, udot, tspan, dt, bcs=bcs, M=M, p=p)
@@ -176,4 +180,3 @@ class DAESolverBlock(GenericSolveBlock):
         self._ad_assign_coefficients(problem.F, func, velfunc)
         self._ad_assign_coefficients(problem.M, func, velfunc)
         self._ad_assign_coefficients(problem.J)
-

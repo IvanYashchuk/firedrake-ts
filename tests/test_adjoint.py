@@ -51,6 +51,7 @@ print(f"First m: {m}")
 
 c = Control(f)
 Jhat = ReducedFunctional(m, c)
+Jhat.optimize_tape()
 print(f"Second m: {Jhat(f)}")
 djdf_adjoint = Jhat.derivative()
 print(f"derivative {djdf_adjoint.dat.data}")

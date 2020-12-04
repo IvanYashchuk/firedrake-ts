@@ -10,6 +10,7 @@ from pyadjoint.overloaded_type import create_overloaded_object
 from ufl import replace
 
 from firedrake_ts.adjoint.blocks import DAESolverBlock
+from firedrake import DirichletBC
 
 
 class DAEProblemMixin:

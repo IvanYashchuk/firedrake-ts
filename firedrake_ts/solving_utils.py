@@ -1,5 +1,7 @@
 from firedrake import assemble
+from firedrake.bcs import DirichletBC
 from firedrake.functionspace import FunctionSpace
+from firedrake.mesh import MeshGeometry
 import numpy
 
 import itertools
@@ -554,12 +556,24 @@ class _TSContext(object):
         if hasattr(ctx._problem, "dependencies"):
             for block_variable in ctx._problem.dependencies:
                 coeff = block_variable.output
+                if coeff not in ctx._problem.M.coefficients():
+                    continue
                 c_rep = block_variable.saved_output
                 if isinstance(coeff, function.Function):
                     trial_function = TrialFunction(coeff.function_space())
                 elif isinstance(coeff, Constant):
                     mesh = ctx._problem.M.ufl_domain()
                     trial_function = TrialFunction(coeff._ad_function_space(mesh))
+                elif isinstance(coeff, DirichletBC):
+                    RuntimeWarning(
+                        "DirichletBC control not supported, ignoring this dependency"
+                    )
+                    continue
+                elif isinstance(coeff, MeshGeometry):
+                    RuntimeWarning(
+                        " MeshGeometry control not supported, ignoring this dependency"
+                    )
+                    continue
 
                 assemble(
                     derivative(ctx._problem.M, c_rep, trial_function),
