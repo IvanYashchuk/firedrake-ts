@@ -2,6 +2,7 @@ import ufl
 from itertools import chain
 from contextlib import ExitStack
 
+from firedrake import function, Constant
 from firedrake import dmhooks, assemble
 from firedrake import slate
 from firedrake import solving_utils
@@ -75,7 +76,6 @@ class DAEProblem(DAEProblemMixin):
         Jp=None,
         M=None,
         m=None,
-        p=None,
         form_compiler_parameters=None,
         is_linear=False,
     ):
@@ -100,15 +100,6 @@ class DAEProblem(DAEProblemMixin):
                 in the derivative calculation
         """
         from firedrake import solving
-        from firedrake import function, Constant
-
-        if p is not None and not (
-            isinstance(p, function.Function) or isinstance(p, Constant)
-        ):
-            raise TypeError(
-                "Provided control p is a '%s', not a Function or Constant"
-                % type(M).__name__
-            )
 
         self.bcs = solving._extract_bcs(bcs)
         # Check form style consistency
@@ -124,7 +115,6 @@ class DAEProblem(DAEProblemMixin):
         self.Jp = Jp
         self.M = M
         self.m = m
-        self.p = p
         if not isinstance(self.u, function.Function):
             raise TypeError(
                 "Provided solution is a '%s', not a Function" % type(self.u).__name__
@@ -307,9 +297,7 @@ class DAESolver(OptionsManager, DAESolverMixin):
             self.quad_dm = self.quad_ts.getDM()
             dmhooks.push_appctx(self.quad_dm, ctx)
             ctx.set_quad_rhsfunction(self.quad_ts)
-            ctx.set_quad_rhsjacobian(self.quad_ts)
-            ctx.set_quad_rhsjacobianP(self.quad_ts)
-            ctx.set_rhsjacobianP(self.ts)
+
         if problem.m:
             self.ts.setSaveTrajectory()
             ctx.set_rhsjacobianP(self.ts)
@@ -324,6 +312,25 @@ class DAESolver(OptionsManager, DAESolverMixin):
         # Used for custom grid transfer.
         self._transfer_operators = ()
         self._setup = False
+
+    def set_adjoint_jacobians(self, ctx):
+        # Cache vectors for assembly of partial derivatives
+        if hasattr(ctx, "dependencies"):
+            ctx._Mjac_p_vecs = {}
+            for block_variable in ctx.dependencies:
+                coeff = block_variable.output
+                if isinstance(coeff, function.Function):
+                    ctx._Mjac_p_vecs[coeff] = function.Function(coeff.function_space())
+                elif isinstance(coeff, Constant):
+                    mesh = self._problem.F.ufl_domain()
+                    ctx._Mjac_p_vecs[coeff] = function.Function(
+                        coeff._ad_function_space(mesh)
+                    )
+        # This functionality is only useful for TSAdjoint
+        # TODO possibly to put setSaveTrajectory here as well
+        ctx.set_quad_rhsjacobian(self.quad_ts)
+        ctx.set_quad_rhsjacobianP(self.quad_ts)
+        ctx.set_rhsjacobianP(self.ts)
 
     def _set_problem_eval_funcs(
         self, ctx, problem, nullspace, nullspace_T, near_nullspace
@@ -452,8 +459,7 @@ class DAESolver(OptionsManager, DAESolverMixin):
         return final_cost + integrated_cost
 
     def adjoint_solve(self):
-        r"""Solve the adjoint problem.
-        """
+        r"""Solve the adjoint problem."""
         self._ctx.set_cost_gradients(self.ts)
         self._set_problem_eval_funcs(
             self._ctx,

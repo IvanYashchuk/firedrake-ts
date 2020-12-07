@@ -5,7 +5,8 @@ from firedrake.mesh import MeshGeometry
 import numpy
 
 import itertools
-from firedrake import homogenize
+from firedrake import homogenize, derivative, adjoint
+from numpy.core.shape_base import block
 from pyadjoint import block_variable
 
 from pyop2 import op2
@@ -164,24 +165,6 @@ class _TSContext(object):
         self._near_nullspace = None
         self._transfer_manager = transfer_manager
 
-        # Cache vectors for assembly of partial derivatives
-        if hasattr(self._problem, "dependencies"):
-            self._Mjac_p_vecs = {}
-            self._dMdp_vecs = {}
-            for block_variable in self._problem.dependencies:
-                coeff = block_variable.output
-                if isinstance(coeff, function.Function):
-                    self._Mjac_p_vecs[coeff] = function.Function(coeff.function_space())
-                    self._dMdp_vecs[coeff] = function.Function(coeff.function_space())
-                elif isinstance(coeff, Constant):
-                    mesh = self._problem.F.ufl_domain()
-                    self._Mjac_p_vecs[coeff] = function.Function(
-                        coeff._ad_function_space(mesh)
-                    )
-                    self._dMdp_vecs[coeff] = function.Function(
-                        coeff._ad_function_space(mesh)
-                    )
-
     def create_assemble_residual(self):
         from firedrake.assemble import create_assembly_callable
 
@@ -239,6 +222,53 @@ class _TSContext(object):
             raise ValueError("Must set transfer manager before first use.")
         self._transfer_manager = manager
 
+    class RHSJacPShell:
+        def __init__(self, ctx):
+            self.ctx = ctx
+
+        def scale(self, A, alpha):
+            raise RuntimeError("Not implemented")
+
+        def mult(self, A, x, y):
+            "y <- A * x"
+            raise RuntimeError("Not implemented")
+
+        def multTranspose(self, A, x, y):
+            "y <- A' * x"
+            y_ownership = y.getOwnershipRange()
+            local_shift = 0
+            for block_variable in self.ctx.dependencies:
+                c_rep = block_variable.saved_output
+                if c_rep not in self.ctx._problem.F.coefficients():
+                    continue
+                if isinstance(c_rep, DirichletBC):
+                    RuntimeWarning(
+                        "DirichletBC control not supported, ignoring this dependency"
+                    )
+                    continue
+                elif isinstance(c_rep, MeshGeometry):
+                    RuntimeWarning(
+                        " MeshGeometry control not supported, ignoring this dependency"
+                    )
+                    continue
+                elif isinstance(c_rep, Constant):
+                    mesh = self.ctx._problem.F.ufl_domain()
+                    tmp = function.Function(c_rep._ad_function_space(mesh))
+                else:
+                    tmp = function.Function(c_rep.function_space())
+                dFdf = derivative(self.ctx._problem.F, c_rep)
+                with tmp.dat.vec as y_vec:
+                    local_range = y_vec.getOwnershipRange()
+                    local_size = local_range[1] - local_range[0]
+                    assemble(adjoint(dFdf)).petscmat.mult(x, y_vec)
+                    y[
+                        (y_ownership[0] + local_shift) : (
+                            y_ownership[0] + local_shift + local_size
+                        )
+                    ] = y_vec.array_r
+                local_shift += c_rep.dat.data.size
+            y.assemble()
+
     def set_ifunction(self, ts):
         r"""Set the function to compute F(t,U,U_t) where F() = 0 is the DAE to be solved."""
         with self._F.dat.vec_wo as v:
@@ -262,22 +292,19 @@ class _TSContext(object):
 
     def set_rhsjacobianP(self, ts):
         r"""Set the function to compute the residual RHS jacobian w.r.t p"""
-        ts.setRHSJacobianP(self.form_rhs_jacobianP, self._dFdp.petscmat)
+        ts.setIJacobianP(self.form_jacobianP, self._dFdp)
 
     def set_cost_gradients(self, ts):
         from firedrake import assemble, derivative
 
         if self._problem.m:
-            assemble(
-                derivative(self._problem.m, self._problem.u),
-                tensor=self._dMdx,
-                bcs=homogenize(self.bcs_F),
-            )
-            assemble(derivative(self._problem.m, self._problem.p), tensor=self._dMdp)
-        with self._dMdx.dat.vec as dMdu_vec, self._dMdp.dat.vec as dMdp_vec:
+            raise RuntimeError("Terminal cost functions not implemented yet")
+
+        self._dMdp.zeroEntries()
+        print(f"_dMdp sizes: {self._dMdp.getSize()}")
+        with self._dMdx.dat.vec as dMdu_vec:
             dMdu_vec.zeroEntries()
-            dMdp_vec.zeroEntries()
-            ts.setCostGradients(dMdu_vec, dMdp_vec)
+            ts.setCostGradients(dMdu_vec, self._dMdp)
 
     def set_nullspace(self, nullspace, ises=None, transpose=False, near=False):
         if nullspace is None:
@@ -553,23 +580,25 @@ class _TSContext(object):
             X.copy(v)
         ctx._problem.time.assign(t)
 
-        if hasattr(ctx._problem, "dependencies"):
-            for block_variable in ctx._problem.dependencies:
+        if hasattr(ctx, "dependencies"):
+            local_shift = 0
+            print("Aqui estamos")
+            for block_variable in ctx.dependencies:
                 coeff = block_variable.output
                 if coeff not in ctx._problem.M.coefficients():
                     continue
                 c_rep = block_variable.saved_output
-                if isinstance(coeff, function.Function):
-                    trial_function = TrialFunction(coeff.function_space())
-                elif isinstance(coeff, Constant):
+                if isinstance(c_rep, function.Function):
+                    trial_function = TrialFunction(c_rep.function_space())
+                elif isinstance(c_rep, Constant):
                     mesh = ctx._problem.M.ufl_domain()
-                    trial_function = TrialFunction(coeff._ad_function_space(mesh))
-                elif isinstance(coeff, DirichletBC):
+                    trial_function = TrialFunction(c_rep._ad_function_space(mesh))
+                elif isinstance(c_rep, DirichletBC):
                     RuntimeWarning(
                         "DirichletBC control not supported, ignoring this dependency"
                     )
                     continue
-                elif isinstance(coeff, MeshGeometry):
+                elif isinstance(c_rep, MeshGeometry):
                     RuntimeWarning(
                         " MeshGeometry control not supported, ignoring this dependency"
                     )
@@ -577,18 +606,26 @@ class _TSContext(object):
 
                 assemble(
                     derivative(ctx._problem.M, c_rep, trial_function),
-                    tensor=ctx._Mjac_p_vecs[coeff],
+                    tensor=ctx._Mjac_p_vecs[c_rep],
                 )
 
-        assemble(derivative(ctx._problem.M, ctx._problem.p), tensor=ctx._Mjac_p_vec)
-        Jmat_array = J.getDenseArray()
-        with ctx._Mjac_p_vec.dat.vec_ro as v:
-            Jmat_array[:, 0] = v.array[:]
-        J.assemble()
+                J_ownership = J.getOwnershipRange()
+                Jmat_array = J.getDenseArray()
+                with ctx._Mjac_p_vecs[c_rep].dat.vec_ro as v:
+                    local_range = v.getOwnershipRange()
+                    local_size = local_range[1] - local_range[0]
+                    Jmat_array[
+                        (J_ownership[0] + local_shift) : (
+                            J_ownership[0] + local_shift + local_size
+                        ),
+                        0,
+                    ] = v.array_r
+                    local_shift += local_size
+            J.assemble()
 
     @staticmethod
     @no_annotations
-    def form_rhs_jacobianP(ts, t, X, J):
+    def form_jacobianP(ts, t, X, Xdot, a, J):
         r"""Form the jacobian of the RHS function w.r.t. p (not P the preconditioner)
         :arg ts: a PETSc TS object
         :arg t: the time at step/stage being solved
@@ -604,10 +641,6 @@ class _TSContext(object):
         ctx._problem.time.assign(t)
         with ctx._problem.u.dat.vec_wo as v:
             X.copy(v)
-
-        dFdp = derivative(-ctx._problem.F, ctx._problem.p)
-
-        assemble(dFdp, tensor=ctx._dFdp)
 
     @staticmethod
     def compute_operators(ksp, J, P):
@@ -696,29 +729,33 @@ class _TSContext(object):
         return djdu_transposed_mat
 
     @cached_property
-    def _Mjac_p_vec(self):
-        if isinstance(self._problem.p, function.Function):
-            return function.Function(self._problem.p.function_space())
-        elif isinstance(self._problem.p, Constant):
-            return function.Function(
-                FunctionSpace(self._problem.u.ufl_domain(), "Real", 0)
-            )
-
-    @cached_property
     def _Mjac_p(self):
         from firedrake import derivative
         from firedrake.assemble import assemble
 
-        local_dofs = self._Mjac_p_vec.dat.data.size
+        local_m_size = 0
+        m = 0
+        for block_variable in self.dependencies:
+            coeff = block_variable.output
+            if isinstance(coeff, DirichletBC):
+                RuntimeWarning(
+                    "DirichletBC control not supported, ignoring this dependency"
+                )
+                continue
+            elif isinstance(coeff, MeshGeometry):
+                RuntimeWarning(
+                    " MeshGeometry control not supported, ignoring this dependency"
+                )
+                continue
+            elif isinstance(coeff, Constant):
+                local_m_size += coeff.dat.data.size
+                m += local_m_size
+            else:
+                local_m_size += coeff.dat.data.size
+                m += coeff.function_space().dim()
 
-        if isinstance(self._problem.p, function.Function):
-            total_dofs = self._Mjac_p_vec.ufl_function_space().dim()
-        else:
-            total_dofs = 1
-
-        djdp_transposed_mat = PETSc.Mat().createDense(
-            [[local_dofs, total_dofs], [1, 1]]
-        )
+        print(f"_M_jacp size: {m}")
+        djdp_transposed_mat = PETSc.Mat().createDense([[local_m_size, m], [1, 1]])
         djdp_transposed_mat.setUp()
 
         return djdp_transposed_mat
@@ -728,7 +765,37 @@ class _TSContext(object):
         from firedrake import derivative
         from firedrake.assemble import assemble
 
-        return assemble(derivative(-self._problem.F, self._problem.p))
+        u = self._problem.u
+        local_n_size = u.dat.data.size
+        n = u.function_space().dim()
+
+        local_m_size = 0
+        m = 0
+        for block_variable in self.dependencies:
+            coeff = block_variable.output
+            if isinstance(coeff, DirichletBC):
+                RuntimeWarning(
+                    "DirichletBC control not supported, ignoring this dependency"
+                )
+                continue
+            elif isinstance(coeff, MeshGeometry):
+                RuntimeWarning(
+                    " MeshGeometry control not supported, ignoring this dependency"
+                )
+                continue
+            elif isinstance(coeff, Constant):
+                local_m_size += coeff.dat.data.size
+                m += local_m_size
+            else:
+                local_m_size += coeff.dat.data.size
+                m += coeff.function_space().dim()
+        J = PETSc.Mat().createAIJ([[local_n_size, n], [local_m_size, m]])
+        J.setType("python")
+        shell = self.RHSJacPShell(self)
+        J.setPythonContext(shell)
+        J.setUp()
+        J.assemble()
+        return J
 
     @cached_property
     def _dMdx(self):
@@ -736,13 +803,7 @@ class _TSContext(object):
 
     @cached_property
     def _dMdp(self):
-
-        if isinstance(self._problem.p, function.Function):
-            return function.Function(self._problem.p.function_space())
-        elif isinstance(self._problem.p, Constant):
-            return function.Function(
-                FunctionSpace(self._problem.u.ufl_domain(), "Real", 0)
-            )
+        return self._Mjac_p.createVecLeft()
 
     @cached_property
     def is_mixed(self):

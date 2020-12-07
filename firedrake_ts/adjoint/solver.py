@@ -29,16 +29,24 @@ class DAEProblemMixin:
             self._ad_J = self.J
             if self.M:
                 self._ad_M = self.M
-                self._ad_p = self.p
             else:
                 self._ad_M = None
-                self._ad_p = None
 
             self._ad_kwargs = {
                 "Jp": self.Jp,
                 "form_compiler_parameters": self.form_compiler_parameters,
                 "is_linear": self.is_linear,
             }
+            self.dependencies = []  # TODO is this necessary for the ProblemMixin?
+            if self.F is not None:
+                for coeff in self.F.coefficients():
+                    self.dependencies.append(coeff)
+
+            if self.M is not None:
+                for coeff in self.M.coefficients():
+                    if coeff in self.dependencies:
+                        continue
+                    self.dependencies.append(coeff)
 
         return wrapper
 
@@ -83,7 +91,6 @@ class DAESolverMixin:
                     problem._ad_dt,
                     problem._ad_bcs,
                     problem._ad_M,
-                    problem._ad_p,
                     problem_J=problem._ad_J,
                     solver_params=self.parameters,
                     solver_kwargs=self._ad_kwargs,
@@ -93,13 +100,15 @@ class DAESolverMixin:
                 if not self._ad_tsvs:
                     from firedrake_ts import DAESolver
 
-                    # Save the dependencies here so we can get the partial derivatives inside PETSc callbacks
                     self._ad_tsvs = DAESolver(
                         self._ad_problem_clone(
                             self._ad_problem, block.get_dependencies()
                         ),
                         **self._ad_kwargs
                     )
+                    # Attach dependencies to context to access them from TSAdjoint
+                    self._ad_tsvs._ctx.dependencies = block.get_dependencies()
+                    self._ad_tsvs.set_adjoint_jacobians(self._ad_tsvs._ctx)
 
                 block._ad_tsvs = self._ad_tsvs
                 tape.add_block(block)
@@ -172,11 +181,10 @@ class DAESolverMixin:
             problem._ad_tspan,
             problem._ad_dt,
             bcs=problem.bcs,
-            p=problem.p,
             M=replace(problem.M, M_replace_map),
             J=replace(problem.J, J_replace_map),
         )
         tsvp._ad_count_map_update(_ad_count_map)
 
-        tsvp.dependencies = dependencies  # TODO Better way?
+        # tsvp.dependencies = dependencies  # TODO Better way?
         return tsvp

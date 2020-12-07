@@ -4,6 +4,8 @@ from firedrake_adjoint import *
 from firedrake import PETSc
 import firedrake_ts
 
+PETSc.Sys.popErrorHandler()
+
 print = lambda x: PETSc.Sys.Print(x)
 
 
@@ -39,7 +41,7 @@ params = {
 
 
 dt = 1e-1
-problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), dt, bcs=bc, M=M, p=f)
+problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), dt, bcs=bc, M=M)
 solver = firedrake_ts.DAESolver(problem, solver_parameters=params)
 
 m = solver.solve(u)
@@ -51,14 +53,14 @@ print(f"First m: {m}")
 
 c = Control(f)
 Jhat = ReducedFunctional(m, c)
-Jhat.optimize_tape()
-print(f"Second m: {Jhat(f)}")
-djdf_adjoint = Jhat.derivative()
-print(f"derivative {djdf_adjoint.dat.data}")
-print(f"Third m: {Jhat(Constant(5.0))}")
-djdf_adjoint = Jhat.derivative()
-print(f"derivative {djdf_adjoint.dat.data}")
-# print(f"Fourth m: {Jhat(Constant(3.0))}")
+# Jhat.optimize_tape()
+# print(f"Second m: {Jhat(f)}")
+# djdf_adjoint = Jhat.derivative()
+# print(f"derivative {djdf_adjoint.dat.data}")
+# print(f"Third m: {Jhat(interpolate(Constant(5.0), V))}")
+# djdf_adjoint = Jhat.derivative()
+# print(f"derivative {djdf_adjoint.dat.data}")
+# print(f"Fourth m: {Jhat(interpolate(Constant(5.0), V))}")
 
-h = Function(V).interpolate(Constant(1.0))
+h = Function(V).interpolate(Constant(1.0e-6))
 assert taylor_test(Jhat, f, h) > 1.9
