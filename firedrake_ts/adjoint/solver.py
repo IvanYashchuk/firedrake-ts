@@ -37,16 +37,6 @@ class DAEProblemMixin:
                 "form_compiler_parameters": self.form_compiler_parameters,
                 "is_linear": self.is_linear,
             }
-            self.dependencies = []  # TODO is this necessary for the ProblemMixin?
-            if self.F is not None:
-                for coeff in self.F.coefficients():
-                    self.dependencies.append(coeff)
-
-            if self.M is not None:
-                for coeff in self.M.coefficients():
-                    if coeff in self.dependencies:
-                        continue
-                    self.dependencies.append(coeff)
 
         return wrapper
 
@@ -186,5 +176,4 @@ class DAESolverMixin:
         )
         tsvp._ad_count_map_update(_ad_count_map)
 
-        # tsvp.dependencies = dependencies  # TODO Better way?
         return tsvp

@@ -88,7 +88,6 @@ class DAESolverBlock(GenericSolveBlock):
         problem.udot = assign_map_F[problem.udot]
 
         self._ad_tsvs.adjoint_solve()
-        dJdu, dJdf = self._ad_tsvs.get_cost_gradients()
 
         revs_assign_map_F = {v: k for k, v in assign_map_F.items()}
         revs_assign_map_M = {v: k for k, v in assign_map_M.items()}
@@ -99,6 +98,7 @@ class DAESolverBlock(GenericSolveBlock):
         problem.u = revs_assign_map_F[problem.u]
         problem.udot = revs_assign_map_F[problem.udot]
 
+        dJdu, dJdf = self._ad_tsvs.get_cost_gradients()
         y_ownership = dJdf.getOwnershipRange()
         local_shift = 0
         for idx, dep in relevant_dependencies:
