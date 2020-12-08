@@ -78,22 +78,30 @@ class DAESolverBlock(GenericSolveBlock):
         func = self.backend.Function(problem.u.function_space())
         velfunc = self.backend.Function(problem.u.function_space())
         assign_map_F = self._ad_create_assign_map(problem.F, func, velfunc)
-        assign_map_M = self._ad_create_assign_map(problem.M, func, velfunc)
+        # TODO is there a better way to avoid checking for this property everywhere?
+        if hasattr(problem, "M") and problem.M:
+            assign_map_M = self._ad_create_assign_map(problem.M, func, velfunc)
         # assign_map_J = self._ad_create_assign_map(problem.J)
 
         problem.F = ufl.replace(problem.F, assign_map_F)
-        problem.M = ufl.replace(problem.M, assign_map_M)
+        # TODO is there a better way to avoid checking for this property everywhere?
+        if hasattr(problem, "M") and problem.M:
+            problem.M = ufl.replace(problem.M, assign_map_M)
         # problem.J = ufl.replace(problem.J, assign_map_J)
         problem.u = assign_map_F[problem.u]
         problem.udot = assign_map_F[problem.udot]
 
-        self._ad_tsvs.adjoint_solve()
+        self._ad_tsvs.adjoint_solve(adj_input=input)
 
         revs_assign_map_F = {v: k for k, v in assign_map_F.items()}
-        revs_assign_map_M = {v: k for k, v in assign_map_M.items()}
+        # TODO is there a better way to avoid checking for this property everywhere?
+        if hasattr(problem, "M") and problem.M:
+            revs_assign_map_M = {v: k for k, v in assign_map_M.items()}
         # revs_assign_map_J = {v: k for k, v in assign_map_J.items()}
         problem.F = ufl.replace(problem.F, revs_assign_map_F)
-        problem.M = ufl.replace(problem.M, revs_assign_map_M)
+        # TODO is there a better way to avoid checking for this property everywhere?
+        if hasattr(problem, "M") and problem.M:
+            problem.M = ufl.replace(problem.M, revs_assign_map_M)
         # problem.J = ufl.replace(problem.J, revs_assign_map_J)
         problem.u = revs_assign_map_F[problem.u]
         problem.udot = revs_assign_map_F[problem.udot]
@@ -129,7 +137,11 @@ class DAESolverBlock(GenericSolveBlock):
                 ]
             local_shift += local_size
             if tmp is not None:
-                dep.add_adj_output(input * tmp)
+                # Whether the output is the solution or the integral
+                if isinstance(input, float):
+                    dep.add_adj_output(input * tmp)
+                else:
+                    dep.add_adj_output(tmp)
 
     def prepare_recompute_component(self, inputs, relevant_outputs):
         pass
@@ -219,5 +231,7 @@ class DAESolverBlock(GenericSolveBlock):
         func = self.backend.Function(problem.u.function_space())
         velfunc = self.backend.Function(problem.u.function_space())
         self._ad_assign_coefficients(problem.F, func, velfunc)
-        self._ad_assign_coefficients(problem.M, func, velfunc)
+        # TODO is there a better way to avoid checking for this property everywhere?
+        if hasattr(problem, "M") and problem.M:
+            self._ad_assign_coefficients(problem.M, func, velfunc)
         # self._ad_assign_coefficients(problem.J)

@@ -14,6 +14,7 @@ from pyop2 import op2
 from firedrake import function, dmhooks, Constant, TrialFunction
 from firedrake.exceptions import ConvergenceError
 from firedrake.petsc import PETSc
+from firedrake import vector
 from firedrake.formmanipulation import ExtractSubBlock
 from firedrake.utils import cached_property
 
@@ -296,13 +297,12 @@ class _TSContext(object):
         ts.setIJacobianP(self.form_jacobianP, self._dFdp)
 
     def set_cost_gradients(self, ts, adj_input=None):
-        from firedrake import assemble, derivative
-
-        if self._problem.m:
-            raise RuntimeError("Terminal cost functions not implemented yet")
 
         self._dMdp.zeroEntries()
         self._dMdx.zeroEntries()
+        if isinstance(adj_input, vector.Vector):
+            with adj_input.dat.vec_ro as adj_vec:
+                adj_vec.copy(self._dMdx)
         ts.setCostGradients(self._dMdx, self._dMdp)
 
     def set_nullspace(self, nullspace, ises=None, transpose=False, near=False):

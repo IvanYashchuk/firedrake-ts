@@ -134,7 +134,9 @@ class DAESolverMixin:
 
         F_coefficients = problem.F.coefficients()
         J_coefficients = problem.J.coefficients()
-        M_coefficients = problem.M.coefficients()
+        # TODO is there a better way to avoid checking for this property everywhere?
+        if hasattr(problem, "M") and problem.M:
+            M_coefficients = problem.M.coefficients()
 
         _ad_count_map = {}
         for block_variable in dependencies:
@@ -155,15 +157,22 @@ class DAESolverMixin:
                     J_replace_map[coeff] = coeff.copy()
                 _ad_count_map[J_replace_map[coeff]] = coeff.count()
 
-            if coeff in M_coefficients and coeff not in M_replace_map:
-                if coeff in F_replace_map:
-                    M_replace_map[coeff] = F_replace_map[coeff]
-                elif isinstance(coeff, Constant):
-                    M_replace_map[coeff] = copy.deepcopy(coeff)
-                else:
-                    M_replace_map[coeff] = coeff.copy()
-                _ad_count_map[M_replace_map[coeff]] = coeff.count()
+            # TODO is there a better way to avoid checking for this property everywhere?
+            if hasattr(problem, "M") and problem.M:
+                if coeff in M_coefficients and coeff not in M_replace_map:
+                    if coeff in F_replace_map:
+                        M_replace_map[coeff] = F_replace_map[coeff]
+                    elif isinstance(coeff, Constant):
+                        M_replace_map[coeff] = copy.deepcopy(coeff)
+                    else:
+                        M_replace_map[coeff] = coeff.copy()
+                    _ad_count_map[M_replace_map[coeff]] = coeff.count()
 
+        # TODO is there a better way to avoid checking for this property everywhere?
+        if hasattr(problem, "M") and problem.M:
+            M_rep = replace(problem.M, M_replace_map)
+        else:
+            M_rep = None
         tsvp = DAEProblem(
             replace(problem.F, F_replace_map),
             F_replace_map[problem.u],
@@ -171,7 +180,7 @@ class DAESolverMixin:
             problem._ad_tspan,
             problem._ad_dt,
             bcs=problem.bcs,
-            M=replace(problem.M, M_replace_map),
+            M=M_rep,
             # J=replace(problem.J, J_replace_map),
         )
         tsvp._ad_count_map_update(_ad_count_map)

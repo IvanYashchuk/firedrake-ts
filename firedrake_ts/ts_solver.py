@@ -286,8 +286,8 @@ class DAESolver(OptionsManager, DAESolverMixin):
             ctx, problem, nullspace, nullspace_T, near_nullspace
         )
 
+        self.ts.setSaveTrajectory()
         if problem.M:
-            self.ts.setSaveTrajectory()
             # Now create QuadratureTS for integrating the cost integral
             self.quad_ts = self.ts.createQuadratureTS(forward=True)
 
@@ -297,10 +297,6 @@ class DAESolver(OptionsManager, DAESolverMixin):
             self.quad_dm = self.quad_ts.getDM()
             dmhooks.push_appctx(self.quad_dm, ctx)
             ctx.set_quad_rhsfunction(self.quad_ts)
-
-        if problem.m:
-            self.ts.setSaveTrajectory()
-            ctx.set_rhsjacobianP(self.ts)
 
         # Set from options now. We need the
         # DM with an app context in place so that if the DM is active
@@ -328,8 +324,9 @@ class DAESolver(OptionsManager, DAESolverMixin):
                     )
         # This functionality is only useful for TSAdjoint
         # TODO possibly to put setSaveTrajectory here as well
-        ctx.set_quad_rhsjacobian(self.quad_ts)
-        ctx.set_quad_rhsjacobianP(self.quad_ts)
+        if self._problem.M is not None:
+            ctx.set_quad_rhsjacobian(self.quad_ts)
+            ctx.set_quad_rhsjacobianP(self.quad_ts)
         ctx.set_rhsjacobianP(self.ts)
 
     def _set_problem_eval_funcs(
@@ -448,19 +445,15 @@ class DAESolver(OptionsManager, DAESolverMixin):
         return self._ctx._dMdx, self._ctx._dMdp
 
     def get_cost_function(self):
-        if self._problem.m:
-            final_cost = assemble(self._ctx.m)
-        else:
-            final_cost = 0.0
         if self._problem.M:
             integrated_cost = self.ts.getCostIntegral().getArray()[0]
         else:
             integrated_cost = 0.0
-        return final_cost + integrated_cost
+        return integrated_cost
 
-    def adjoint_solve(self):
+    def adjoint_solve(self, adj_input=None):
         r"""Solve the adjoint problem."""
-        self._ctx.set_cost_gradients(self.ts)
+        self._ctx.set_cost_gradients(self.ts, adj_input)
         self._set_problem_eval_funcs(
             self._ctx,
             self._problem,
