@@ -295,17 +295,15 @@ class _TSContext(object):
         r"""Set the function to compute the residual RHS jacobian w.r.t p"""
         ts.setIJacobianP(self.form_jacobianP, self._dFdp)
 
-    def set_cost_gradients(self, ts):
+    def set_cost_gradients(self, ts, adj_input=None):
         from firedrake import assemble, derivative
 
         if self._problem.m:
             raise RuntimeError("Terminal cost functions not implemented yet")
 
         self._dMdp.zeroEntries()
-        print(f"_dMdp sizes: {self._dMdp.getSize()}")
-        with self._dMdx.dat.vec as dMdu_vec:
-            dMdu_vec.zeroEntries()
-            ts.setCostGradients(dMdu_vec, self._dMdp)
+        self._dMdx.zeroEntries()
+        ts.setCostGradients(self._dMdx, self._dMdp)
 
     def set_nullspace(self, nullspace, ises=None, transpose=False, near=False):
         if nullspace is None:
@@ -754,7 +752,6 @@ class _TSContext(object):
                 local_m_size += coeff.dat.data.size
                 m += coeff.function_space().dim()
 
-        print(f"_M_jacp size: {m}")
         djdp_transposed_mat = PETSc.Mat().createDense([[local_m_size, m], [1, 1]])
         djdp_transposed_mat.setUp()
 
@@ -799,7 +796,7 @@ class _TSContext(object):
 
     @cached_property
     def _dMdx(self):
-        return function.Function(self._problem.F.arguments()[0].function_space())
+        return self._Mjac_x.createVecLeft()
 
     @cached_property
     def _dMdp(self):

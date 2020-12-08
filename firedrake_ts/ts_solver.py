@@ -96,7 +96,7 @@ class DAEProblem(DAEProblemMixin):
             are given either in 'A == b' style or in 'F == 0' style.
         :param M: Functional integrated in time which employs the TS solution and used by TSAdjoint
                 in the derivative calculation
-        :param M: Functional at terminal time which employs the TS solution and used by TSAdjoint
+        :param m: Functional at terminal time which employs the TS solution and used by TSAdjoint
                 in the derivative calculation
         """
         from firedrake import solving

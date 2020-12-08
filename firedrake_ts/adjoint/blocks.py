@@ -129,7 +129,7 @@ class DAESolverBlock(GenericSolveBlock):
                 ]
             local_shift += local_size
             if tmp is not None:
-                dep.add_adj_output(tmp)
+                dep.add_adj_output(input * tmp)
 
     def prepare_recompute_component(self, inputs, relevant_outputs):
         pass
