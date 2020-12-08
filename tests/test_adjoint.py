@@ -33,6 +33,7 @@ params = {
     "ts_type": "theta",
     "ts_type": "theta",
     # "ts_monitor_solution": None,
+    "ts_adjoint_monitor_sensi": None,
     "ts_adjoint_monitor": None,
     "ts_monitor": None,
     "ts_theta_theta": 0.5,  # implicit midpoint method | the Gauss–Legendre method of order two
