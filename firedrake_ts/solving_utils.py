@@ -2,6 +2,7 @@ from firedrake import assemble
 from firedrake.bcs import DirichletBC
 from firedrake.functionspace import FunctionSpace
 from firedrake.mesh import MeshGeometry
+from firedrake.ufl_expr import TestFunction
 import numpy
 
 import itertools
@@ -583,15 +584,14 @@ class _TSContext(object):
         if hasattr(ctx, "dependencies"):
             local_shift = 0
             for block_variable in ctx.dependencies:
-                coeff = block_variable.output
-                if coeff not in ctx._problem.M.coefficients():
-                    continue
                 c_rep = block_variable.saved_output
+                if c_rep not in ctx._problem.M.coefficients():
+                    continue
                 if isinstance(c_rep, function.Function):
-                    trial_function = TrialFunction(c_rep.function_space())
+                    trial_function = TestFunction(c_rep.function_space())
                 elif isinstance(c_rep, Constant):
                     mesh = ctx._problem.M.ufl_domain()
-                    trial_function = TrialFunction(c_rep._ad_function_space(mesh))
+                    trial_function = TestFunction(c_rep._ad_function_space(mesh))
                 elif isinstance(c_rep, DirichletBC):
                     RuntimeWarning(
                         "DirichletBC control not supported, ignoring this dependency"
@@ -603,14 +603,15 @@ class _TSContext(object):
                     )
                     continue
 
+                coeff = block_variable.output
                 assemble(
                     derivative(ctx._problem.M, c_rep, trial_function),
-                    tensor=ctx._Mjac_p_vecs[c_rep],
+                    tensor=ctx._Mjac_p_vecs[coeff],
                 )
 
                 J_ownership = J.getOwnershipRange()
                 Jmat_array = J.getDenseArray()
-                with ctx._Mjac_p_vecs[c_rep].dat.vec_ro as v:
+                with ctx._Mjac_p_vecs[coeff].dat.vec_ro as v:
                     local_range = v.getOwnershipRange()
                     local_size = local_range[1] - local_range[0]
                     Jmat_array[
