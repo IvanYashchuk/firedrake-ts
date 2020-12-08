@@ -172,7 +172,7 @@ class DAESolverMixin:
             problem._ad_dt,
             bcs=problem.bcs,
             M=replace(problem.M, M_replace_map),
-            J=replace(problem.J, J_replace_map),
+            # J=replace(problem.J, J_replace_map),
         )
         tsvp._ad_count_map_update(_ad_count_map)
 

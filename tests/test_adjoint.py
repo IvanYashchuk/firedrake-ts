@@ -33,9 +33,9 @@ params = {
     "ts_type": "theta",
     "ts_type": "theta",
     # "ts_monitor_solution": None,
-    "ts_adjoint_monitor_sensi": None,
-    "ts_adjoint_monitor": None,
-    "ts_monitor": None,
+    # "ts_adjoint_monitor_sensi": None,
+    # "ts_adjoint_monitor": None,
+    # "ts_monitor": None,
     "ts_theta_theta": 0.5,  # implicit midpoint method | the Gauss–Legendre method of order two
     "ts_exact_final_time": "matchstep",
 }
@@ -63,5 +63,5 @@ print(f"derivative {djdf_adjoint.dat.data}")
 # print(f"derivative {djdf_adjoint.dat.data}")
 # print(f"Fourth m: {Jhat(interpolate(Constant(5.0), V))}")
 
-h = Function(V).interpolate(Constant(1.0e-6))
+h = Function(V).interpolate(Constant(1.0))
 assert taylor_test(Jhat, f, h) > 1.9

@@ -582,7 +582,6 @@ class _TSContext(object):
 
         if hasattr(ctx, "dependencies"):
             local_shift = 0
-            print("Aqui estamos")
             for block_variable in ctx.dependencies:
                 coeff = block_variable.output
                 if coeff not in ctx._problem.M.coefficients():
