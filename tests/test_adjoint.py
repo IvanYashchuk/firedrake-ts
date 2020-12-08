@@ -159,10 +159,8 @@ def test_terminal_cost_function_adjoint():
         "ksp_type": "preonly",
         "pc_type": "lu",
         "ts_type": "theta",
-        "ts_type": "theta",
         "ts_theta_theta": 0.5,
-        "ts_exact_final_time": "matchstep",
-        "ts_adjoint_monitor_sensi": None,
+        "ts_theta_endpoint": None,
     }
 
     dt = 1e-1
@@ -171,7 +169,7 @@ def test_terminal_cost_function_adjoint():
 
     u = solver.solve(u)
 
-    J = assemble(u * dx)
+    J = assemble(u * u * dx)
 
     c = Control(f)
     Jhat = ReducedFunctional(J, c)
@@ -184,7 +182,7 @@ def test_terminal_cost_function_adjoint():
 
 
 if __name__ == "__main__":
-    # test_integral_control_in_cost_function_adjoint()
-    # test_integral_cost_function_adjoint()
-    # test_integral_cost_function_recompute()
+    test_integral_control_in_cost_function_adjoint()
+    test_integral_cost_function_adjoint()
+    test_integral_cost_function_recompute()
     test_terminal_cost_function_adjoint()

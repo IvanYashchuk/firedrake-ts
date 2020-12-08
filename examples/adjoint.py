@@ -42,7 +42,8 @@ def ts_monitor(ts, steps, time, X):
     state_out.write(u, time=time)
 
 
-problem = firedrake_ts.DAEProblem(F, u, u_dot, tspan, bcs=bc)
+dt = 0.03
+problem = firedrake_ts.DAEProblem(F, u, u_dot, tspan, dt, bcs=bc)
 solver = firedrake_ts.DAESolver(problem, monitor_callback=ts_monitor)
 
 ts = solver.ts

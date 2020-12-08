@@ -301,6 +301,8 @@ class _TSContext(object):
         self._dMdp.zeroEntries()
         self._dMdx.zeroEntries()
         if isinstance(adj_input, vector.Vector):
+            bcs = (homogenize(self.bcs_J),)
+            bcs[0][0].apply(adj_input)  # TODO what if Dirichlet is a control
             with adj_input.dat.vec_ro as adj_vec:
                 adj_vec.copy(self._dMdx)
         ts.setCostGradients(self._dMdx, self._dMdp)
