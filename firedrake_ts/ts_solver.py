@@ -311,7 +311,7 @@ class DAESolver(OptionsManager, DAESolverMixin):
 
     def set_adjoint_jacobians(self, ctx):
         # Cache vectors for assembly of partial derivatives
-        if hasattr(ctx, "dependencies"):
+        if hasattr(ctx, "dependencies") and self._problem.M:
             ctx._Mjac_p_vecs = {}
             for block_variable in ctx.dependencies:
                 coeff = block_variable.output
@@ -324,7 +324,7 @@ class DAESolver(OptionsManager, DAESolverMixin):
                     )
         # This functionality is only useful for TSAdjoint
         # TODO possibly to put setSaveTrajectory here as well
-        if self._problem.M is not None:
+        if self._problem.M:
             ctx.set_quad_rhsjacobian(self.quad_ts)
             ctx.set_quad_rhsjacobianP(self.quad_ts)
         ctx.set_rhsjacobianP(self.ts)
