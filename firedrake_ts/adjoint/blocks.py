@@ -1,7 +1,8 @@
 import copy
 from firedrake.adjoint.blocks import GenericSolveBlock, solve_init_params
-from firedrake import Constant, DirichletBC, function
+from firedrake import Constant, DirichletBC, function, vector
 from firedrake.mesh import MeshGeometry
+from numpy.lib.arraysetops import isin
 from pyadjoint.tape import stop_annotating
 import ufl
 
@@ -68,10 +69,15 @@ class DAESolverBlock(GenericSolveBlock):
         if len(relevant_dependencies) <= 0:
             return
 
-        input = adj_inputs[0]
+        input = adj_inputs[0] or adj_inputs[1]
+
+        problem = self._ad_tsvs._problem
+        if problem.M and isinstance(input, float):
+            self._ad_tsvs.set_adjoint_jacobians(self._ad_tsvs._ctx)
+        elif isinstance(input, vector.Vector) and problem.M:
+            self._ad_tsvs.set_adjoint_jacobians(self._ad_tsvs._ctx, zero=True)
 
         # TODO clean and refactor the next ~30 lines
-        problem = self._ad_tsvs._problem
         func = self.backend.Function(problem.u.function_space())
         velfunc = self.backend.Function(problem.u.function_space())
         assign_map_F = self._ad_create_assign_map(problem.F, func, velfunc)
@@ -187,7 +193,15 @@ class DAESolverBlock(GenericSolveBlock):
         self._ad_tsvs_replace_forms()
         self._ad_tsvs.parameters.update(self.solver_params)
 
-        return self._ad_tsvs.solve(self._ad_tsvs._problem.u)
+        if self._ad_tsvs._problem.M:
+            u, m = self._ad_tsvs.solve(self._ad_tsvs._problem.u)
+        else:
+            u = self._ad_tsvs.solve(self._ad_tsvs._problem.u)
+
+        if isinstance(block_variable.output, float):
+            return m
+        else:
+            return u
 
     def _ad_assign_map(self, form):
         count_map = self._ad_tsvs._problem._ad_count_map

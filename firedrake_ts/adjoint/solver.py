@@ -68,6 +68,7 @@ class DAESolverMixin:
             for the purposes of visualisation)."""
 
             annotate = annotate_tape(kwargs)
+            problem = self._problem
             if annotate:
                 tape = get_working_tape()
                 problem = self._ad_problem
@@ -98,22 +99,29 @@ class DAESolverMixin:
                     )
                     # Attach dependencies to context to access them from TSAdjoint
                     self._ad_tsvs._ctx.dependencies = block.get_dependencies()
-                    self._ad_tsvs.set_adjoint_jacobians(self._ad_tsvs._ctx)
+                    #self._ad_tsvs.set_adjoint_jacobians(self._ad_tsvs._ctx)
 
                 block._ad_tsvs = self._ad_tsvs
                 tape.add_block(block)
 
             with stop_annotating():
-                out = solve(self, *args, **kwargs)
+                if problem.M:
+                    out_u, out_m = solve(self, *args, **kwargs)
+                else:
+                    out = solve(self, *args, **kwargs)
 
             if annotate:
                 if problem.M:
-                    out = create_overloaded_object(out)
-                    block.add_output(out.block_variable)
+                    out_m = create_overloaded_object(out_m)
+                    block.add_output(out_m.block_variable)
+                    block.add_output(self._ad_problem._ad_u.create_block_variable())
                 else:
                     block.add_output(self._ad_problem._ad_u.create_block_variable())
 
-            return out
+            if problem.M:
+                return (out_u, out_m)
+            else:
+                return out
 
         return wrapper
 

@@ -309,25 +309,32 @@ class DAESolver(OptionsManager, DAESolverMixin):
         self._transfer_operators = ()
         self._setup = False
 
-    def set_adjoint_jacobians(self, ctx):
-        # Cache vectors for assembly of partial derivatives
-        if hasattr(ctx, "dependencies") and self._problem.M:
-            ctx._Mjac_p_vecs = {}
-            for block_variable in ctx.dependencies:
-                coeff = block_variable.output
-                if isinstance(coeff, function.Function):
-                    ctx._Mjac_p_vecs[coeff] = function.Function(coeff.function_space())
-                elif isinstance(coeff, Constant):
-                    mesh = self._problem.F.ufl_domain()
-                    ctx._Mjac_p_vecs[coeff] = function.Function(
-                        coeff._ad_function_space(mesh)
-                    )
-        # This functionality is only useful for TSAdjoint
-        # TODO possibly to put setSaveTrajectory here as well
-        if self._problem.M:
-            ctx.set_quad_rhsjacobian(self.quad_ts)
-            ctx.set_quad_rhsjacobianP(self.quad_ts)
-        ctx.set_rhsjacobianP(self.ts)
+    # TODO change the name to refer to just the cost function jacobians
+    def set_adjoint_jacobians(self, ctx, zero=False):
+        if zero:
+            ctx.set_quad_rhsjacobian(self.quad_ts, zero)
+            ctx.set_quad_rhsjacobianP(self.quad_ts, zero)
+        else:
+            # Cache vectors for assembly of partial derivatives
+            if hasattr(ctx, "dependencies") and self._problem.M:
+                ctx._Mjac_p_vecs = {}
+                for block_variable in ctx.dependencies:
+                    coeff = block_variable.output
+                    if isinstance(coeff, function.Function):
+                        ctx._Mjac_p_vecs[coeff] = function.Function(
+                            coeff.function_space()
+                        )
+                    elif isinstance(coeff, Constant):
+                        mesh = self._problem.F.ufl_domain()
+                        ctx._Mjac_p_vecs[coeff] = function.Function(
+                            coeff._ad_function_space(mesh)
+                        )
+            # This functionality is only useful for TSAdjoint
+            # TODO possibly to put setSaveTrajectory here as well
+            # TODO, I think this function is only called if problem.M is not None anyways
+            if self._problem.M:
+                ctx.set_quad_rhsjacobian(self.quad_ts)
+                ctx.set_quad_rhsjacobianP(self.quad_ts)
 
     def _set_problem_eval_funcs(
         self, ctx, problem, nullspace, nullspace_T, near_nullspace
@@ -437,7 +444,7 @@ class DAESolver(OptionsManager, DAESolverMixin):
         check_ts_convergence(self.ts)
 
         if self._problem.M:
-            return self.get_cost_function()
+            return (self._problem.u, self.get_cost_function())
         else:
             return self._problem.u
 
@@ -461,6 +468,10 @@ class DAESolver(OptionsManager, DAESolverMixin):
             self.nullspace_T,
             self.near_nullspace,
         )
+
+        # TODO this is only necessary if you have dependencies, what if you
+        # have a dependency on the initial condition (the rhsjacobianP will be zero)
+        self._ctx.set_rhsjacobianP(self.ts)
         # Make sure appcontext is attached to the DM before the adjoint solve.
         dm = self.ts.getDM()
 

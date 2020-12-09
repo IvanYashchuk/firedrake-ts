@@ -284,13 +284,19 @@ class _TSContext(object):
         r"""Set the function to compute the cost function integrand"""
         ts.setRHSFunction(self.form_cost_integrand)
 
-    def set_quad_rhsjacobian(self, ts):
+    def set_quad_rhsjacobian(self, ts, zero=False):
         r"""Set the function to compute the cost function integrand jacobian w.r.t U"""
-        ts.setRHSJacobian(self.form_cost_jacobian, J=self._Mjac_x)
+        if zero:
+            ts.setRHSJacobian(self.form_cost_jacobian_zero, J=self._Mjac_x)
+        else:
+            ts.setRHSJacobian(self.form_cost_jacobian, J=self._Mjac_x)
 
-    def set_quad_rhsjacobianP(self, ts):
+    def set_quad_rhsjacobianP(self, ts, zero=False):
         r"""Set the function to compute the cost function integrand jacobian w.r.t p"""
-        ts.setRHSJacobianP(self.form_cost_jacobianP, A=self._Mjac_p)
+        if zero:
+            ts.setRHSJacobianP(self.form_cost_jacobianP_zero, A=self._Mjac_p)
+        else:
+            ts.setRHSJacobianP(self.form_cost_jacobianP, A=self._Mjac_p)
 
     def set_rhsjacobianP(self, ts):
         r"""Set the function to compute the residual RHS jacobian w.r.t p"""
@@ -561,6 +567,19 @@ class _TSContext(object):
 
     @staticmethod
     @no_annotations
+    def form_cost_jacobian_zero(ts, t, X, J, P):
+        r"""Form the jacobian of the nost function
+
+        :arg ts: a PETSc TS object
+        :arg t: the time at step/stage being solved
+        :arg X: state vector
+        :arg J: the Jacobian (a Mat)
+        :arg P: the preconditioner matrix (a Mat)
+        """
+        pass
+
+    @staticmethod
+    @no_annotations
     def form_cost_jacobianP(ts, t, X, J):
         r"""Form the jacobian of the cost function w.r.t. p
 
@@ -622,6 +641,19 @@ class _TSContext(object):
                     ] = v.array_r
                     local_shift += local_size
             J.assemble()
+
+    @staticmethod
+    @no_annotations
+    def form_cost_jacobianP_zero(ts, t, X, J):
+        r"""Form the jacobian of the cost function w.r.t. p
+
+        :arg ts: a PETSc TS object
+        :arg t: the time at step/stage being solved
+        :arg X: state vector
+        :arg J: the Jacobian (a Mat)
+        :arg P: the preconditioner matrix (a Mat)
+        """
+        pass
 
     @staticmethod
     @no_annotations
