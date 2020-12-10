@@ -11,20 +11,8 @@ import firedrake_ts
 
 class DAESolverBlock(GenericSolveBlock):
     def __init__(
-        self,
-        F,
-        u,
-        udot,
-        tspan,
-        dt,
-        bcs,
-        M,
-        problem_J,
-        solver_params,
-        solver_kwargs,
-        **kwargs
+        self, F, u, udot, tspan, dt, bcs, M, u0, solver_params, solver_kwargs, **kwargs
     ):
-        self.problem_J = problem_J
         self.solver_params = solver_params.copy()
         self.solver_kwargs = solver_kwargs
 
@@ -33,16 +21,15 @@ class DAESolverBlock(GenericSolveBlock):
         self.udot = udot
         self.M = M
 
-        # TODO The DAEProblem also records the dependencies (so we can access them in TSAdjoint)
-        # Maybe you should copy that from there. Or maybe you should only allocate them if we are
-        # using TS with pyadjoint?
-        if self.problem_J is not None:
-            for coeff in self.problem_J.coefficients():
-                self.add_dependency(coeff, no_duplicates=True)
-
         if self.M is not None:
             for coeff in self.M.coefficients():
                 self.add_dependency(coeff, no_duplicates=True)
+
+        self.add_dependency(u0, no_duplicates=True)
+        # Keep a reference to the initial condition to avoid
+        # generating its jacobians and to assign it the proper
+        # gradient
+        self.u0 = u0
 
     def _init_solver_parameters(self, args, kwargs):
         super()._init_solver_parameters(args, kwargs)
@@ -112,96 +99,71 @@ class DAESolverBlock(GenericSolveBlock):
 
         dJdu, dJdf = self._ad_tsvs.get_cost_gradients()
         y_ownership = dJdf.getOwnershipRange()
+
         local_shift = 0
         for idx, dep in relevant_dependencies:
-            c_rep = dep.saved_output
-            if isinstance(c_rep, DirichletBC):
-                RuntimeWarning(
-                    "DirichletBC control not supported, ignoring this dependency"
-                )
-                continue
-            elif isinstance(c_rep, MeshGeometry):
-                RuntimeWarning(
-                    " MeshGeometry control not supported, ignoring this dependency"
-                )
-                continue
-            elif isinstance(c_rep, Constant):
-                mesh = self._ad_tsvs._ctx._problem.F.ufl_domain()
-                tmp = function.Function(c_rep._ad_function_space(mesh))
-            else:
-                tmp = function.Function(c_rep.function_space())
-
-            with tmp.dat.vec as y_vec:
-                local_range = y_vec.getOwnershipRange()
-                local_size = local_range[1] - local_range[0]
-                y_vec[:] = dJdf[
-                    (y_ownership[0] + local_shift) : (
-                        y_ownership[0] + local_shift + local_size
-                    )
-                ]
-            local_shift += local_size
-            if tmp is not None:
-                # Whether the output is the solution or the integral
+            if dep.output == self.u0:
                 if isinstance(input, float):
-                    dep.add_adj_output(input * tmp)
+                    dep.add_adj_output(input * dJdu)
                 else:
-                    dep.add_adj_output(tmp)
+                    dep.add_adj_output(dJdu)
+            else:
+                c_rep = dep.saved_output
+                if isinstance(c_rep, DirichletBC):
+                    RuntimeWarning(
+                        "DirichletBC control not supported, ignoring this dependency"
+                    )
+                    continue
+                elif isinstance(c_rep, MeshGeometry):
+                    RuntimeWarning(
+                        " MeshGeometry control not supported, ignoring this dependency"
+                    )
+                    continue
+                elif isinstance(c_rep, Constant):
+                    mesh = self._ad_tsvs._ctx._problem.F.ufl_domain()
+                    tmp = function.Function(c_rep._ad_function_space(mesh))
+                else:
+                    tmp = function.Function(c_rep.function_space())
+
+                with tmp.dat.vec as y_vec:
+                    local_range = y_vec.getOwnershipRange()
+                    local_size = local_range[1] - local_range[0]
+                    y_vec[:] = dJdf[
+                        (y_ownership[0] + local_shift) : (
+                            y_ownership[0] + local_shift + local_size
+                        )
+                    ]
+                local_shift += local_size
+                if tmp is not None:
+                    # Whether the output is the solution or the integral
+                    if isinstance(input, float):
+                        dep.add_adj_output(input * tmp)
+                    else:
+                        dep.add_adj_output(tmp)
 
     def prepare_recompute_component(self, inputs, relevant_outputs):
         pass
-
-    def _replace_map(self, form):
-        replace_coeffs = {}
-        for block_variable in self.get_dependencies():
-            coeff = block_variable.output
-            if coeff in form.coefficients():
-                replace_coeffs[coeff] = block_variable.saved_output
-        return replace_coeffs
-
-    def _replace_form(self, form, func=None, velfunc=None):
-        """Replace the form coefficients with checkpointed values
-
-        func represents the initial guess if relevant.
-        """
-        replace_map = self._replace_map(form)
-        if func is not None and self.func in replace_map:
-            self.backend.Function.assign(func, replace_map[self.func])
-            replace_map[self.func] = func
-        if velfunc is not None and self.udot in replace_map:
-            self.backend.Function.assign(velfunc, replace_map[self.udot])
-            replace_map[self.udot] = velfunc
-
-        return ufl.replace(form, replace_map)
-
-    def _replace_recompute_form(self):
-        func = self._create_initial_guess()
-        velfunc = self._create_initial_guess()
-
-        bcs = self._recover_bcs()
-        lhs = self._replace_form(self.lhs, func=func, velfunc=velfunc)
-        rhs = 0
-        if self.linear:
-            rhs = self._replace_form(self.rhs)
-
-        M = self._replace_form(self.M, func=func, velfunc=velfunc)
-
-        return lhs, rhs, func, velfunc, bcs, M
 
     def recompute_component(self, inputs, block_variable, idx, prepared):
         from firedrake import Function
 
         self._ad_tsvs_replace_forms()
         self._ad_tsvs.parameters.update(self.solver_params)
+        u = self._ad_tsvs._problem.u
+        # Pyadjoint uses the output as the new checkpoint.
+        # We're providing a new one. TODO does it make sense?
+        # It should not, since you're not recording
+        u_func = u.copy(deepcopy=True)
 
         if self._ad_tsvs._problem.M:
-            u, m = self._ad_tsvs.solve(self._ad_tsvs._problem.u)
+            u_func, m = self._ad_tsvs.solve(u_func)
+            if isinstance(block_variable.output, float):
+                return m
+            else:
+                return u_func
         else:
-            u = self._ad_tsvs.solve(self._ad_tsvs._problem.u)
-
-        if isinstance(block_variable.output, float):
-            return m
-        else:
-            return u
+            u_func = self._ad_tsvs.solve(u_func)
+            return u_func
 
     def _ad_assign_map(self, form):
         count_map = self._ad_tsvs._problem._ad_count_map

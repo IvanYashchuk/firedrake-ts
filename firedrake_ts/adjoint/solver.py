@@ -70,6 +70,7 @@ class DAESolverMixin:
             annotate = annotate_tape(kwargs)
             problem = self._problem
             if annotate:
+                u0 = args[0]
                 tape = get_working_tape()
                 problem = self._ad_problem
                 sb_kwargs = DAESolverBlock.pop_kwargs(kwargs)
@@ -82,10 +83,10 @@ class DAESolverMixin:
                     problem._ad_dt,
                     problem._ad_bcs,
                     problem._ad_M,
-                    problem_J=problem._ad_J,
+                    u0=u0,
                     solver_params=self.parameters,
                     solver_kwargs=self._ad_kwargs,
-                    **sb_kwargs
+                    **sb_kwargs,
                 )
 
                 if not self._ad_tsvs:
@@ -95,11 +96,10 @@ class DAESolverMixin:
                         self._ad_problem_clone(
                             self._ad_problem, block.get_dependencies()
                         ),
-                        **self._ad_kwargs
+                        **self._ad_kwargs,
                     )
                     # Attach dependencies to context to access them from TSAdjoint
                     self._ad_tsvs._ctx.dependencies = block.get_dependencies()
-                    #self._ad_tsvs.set_adjoint_jacobians(self._ad_tsvs._ctx)
 
                 block._ad_tsvs = self._ad_tsvs
                 tape.add_block(block)

@@ -396,6 +396,7 @@ class DAESolver(OptionsManager, DAESolverMixin):
 
         with self._problem.u.dat.vec_wo as u, u0.dat.vec as u0v:
             u0v.copy(u)
+        self._ctx.u0 = u0
 
         # Necessary to reset the problem as ts.solve() starts from the last time step used.
         self.ts.setTimeStep(self.dt)
