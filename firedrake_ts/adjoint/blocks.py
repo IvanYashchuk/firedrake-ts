@@ -59,10 +59,6 @@ class DAESolverBlock(GenericSolveBlock):
         input = adj_inputs[0] or adj_inputs[1]
 
         problem = self._ad_tsvs._problem
-        if problem.M and isinstance(input, float):
-            self._ad_tsvs.set_adjoint_jacobians(self._ad_tsvs._ctx)
-        elif isinstance(input, vector.Vector) and problem.M:
-            self._ad_tsvs.set_adjoint_jacobians(self._ad_tsvs._ctx, zero=True)
 
         # TODO clean and refactor the next ~30 lines
         func = self.backend.Function(problem.u.function_space())
@@ -77,6 +73,11 @@ class DAESolverBlock(GenericSolveBlock):
         if hasattr(problem, "M") and problem.M:
             assign_map_M = self._ad_create_assign_map(problem.M, func, velfunc)
             problem.M = ufl.replace(problem.M, assign_map_M)
+
+        if problem.M and isinstance(input, float):
+            self._ad_tsvs.set_adjoint_jacobians(self._ad_tsvs._ctx)
+        elif isinstance(input, vector.Vector) and problem.M:
+            self._ad_tsvs.set_adjoint_jacobians(self._ad_tsvs._ctx, zero=True)
 
         problem.u = assign_map_F[problem.u]
         problem.udot = assign_map_F[problem.udot]

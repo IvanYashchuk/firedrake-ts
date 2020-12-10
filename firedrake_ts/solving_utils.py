@@ -242,9 +242,9 @@ class _TSContext(object):
             block_outputs = [dep.output for dep in self.ctx.block.get_outputs()]
             for block_variable in self.ctx.block.get_dependencies():
                 coeff = block_variable.output
+                c_rep = block_variable.saved_output
                 if coeff in block_outputs:
                     continue
-                c_rep = block_variable.saved_output
                 if c_rep not in self.ctx._problem.F.coefficients():
                     continue
                 if isinstance(c_rep, DirichletBC):
@@ -606,10 +606,12 @@ class _TSContext(object):
 
         if ctx.block.get_dependencies():
             local_shift = 0
-            for block_variable in ctx.block.get_dependencies():
+            for i, block_variable in enumerate(ctx.block.get_dependencies()):
                 c_rep = block_variable.saved_output
+                print(f"index: {i}")
                 if c_rep not in ctx._problem.M.coefficients():
                     continue
+                print(f"Local shift arriba: {local_shift}")
                 if isinstance(c_rep, function.Function):
                     trial_function = TestFunction(c_rep.function_space())
                 elif isinstance(c_rep, Constant):
@@ -637,6 +639,9 @@ class _TSContext(object):
                 with ctx._Mjac_p_vecs[coeff].dat.vec_ro as v:
                     local_range = v.getOwnershipRange()
                     local_size = local_range[1] - local_range[0]
+                    print(f"Local shift: {local_shift}, local size: {local_size}")
+                    print(f"v.array_r size: {v.array_r.size}")
+                    print(f"Jmat array: {Jmat_array.size}")
                     Jmat_array[
                         (J_ownership[0] + local_shift) : (
                             J_ownership[0] + local_shift + local_size
@@ -644,6 +649,7 @@ class _TSContext(object):
                         0,
                     ] = v.array_r
                     local_shift += local_size
+                    print(f"Local shift eing: {local_shift}")
             J.assemble()
 
     @staticmethod
@@ -766,15 +772,16 @@ class _TSContext(object):
 
     @cached_property
     def _Mjac_p(self):
-        from firedrake import derivative
-        from firedrake.assemble import assemble
-
+        # TODO _Mjac_p and the form_cost_jacobianP share the same loop over the dependencies
+        # You should refactor them together or something
+        # This vector is allocated each time the adjoint is evaluated. Refactor?
         local_m_size = 0
         m = 0
         block_outputs = [dep.output for dep in self.block.get_outputs()]
         for block_variable in self.block.get_dependencies():
             coeff = block_variable.output
-            if coeff in block_outputs:
+            c_rep = block_variable.saved_output
+            if coeff in block_outputs or (c_rep not in self._problem.M.coefficients()):
                 continue
             # if self.u0:
             #    if coeff == self.u0:
@@ -804,6 +811,7 @@ class _TSContext(object):
 
     @cached_property
     def _dFdp(self):
+        # TODO another loop that it is the same than _Mjac_p and _Mjac_p_vecs... REFACTOR!!
         from firedrake import derivative
         from firedrake.assemble import assemble
 
@@ -816,7 +824,8 @@ class _TSContext(object):
         block_outputs = [dep.output for dep in self.block.get_outputs()]
         for block_variable in self.block.get_dependencies():
             coeff = block_variable.output
-            if coeff in block_outputs:
+            c_rep = block_variable.saved_output
+            if coeff in block_outputs or (c_rep not in self._problem.F.coefficients()):
                 continue
             if isinstance(coeff, DirichletBC):
                 RuntimeWarning(
@@ -834,6 +843,7 @@ class _TSContext(object):
             else:
                 local_m_size += coeff.dat.data.size
                 m += coeff.function_space().dim()
+        print(f"dFdp sizes: {n}, {m}")
         J = PETSc.Mat().createAIJ([[local_n_size, n], [local_m_size, m]])
         J.setType("python")
         shell = self.RHSJacPShell(self)
@@ -848,7 +858,7 @@ class _TSContext(object):
 
     @cached_property
     def _dMdp(self):
-        return self._Mjac_p.createVecLeft()
+        return self._dFdp.createVecRight()
 
     @cached_property
     def is_mixed(self):

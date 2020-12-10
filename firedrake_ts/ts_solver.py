@@ -1,3 +1,4 @@
+from numpy.core.shape_base import block
 import ufl
 from itertools import chain
 from contextlib import ExitStack
@@ -317,12 +318,16 @@ class DAESolver(OptionsManager, DAESolverMixin):
         else:
             # Cache vectors for assembly of partial derivatives
             # TODO, the responsability for creating these vectors should be left for the context...
+            # Same loop than in _Mjac_p and form_cost_jacobianP. It should all be the same
             if ctx.block.get_dependencies() and self._problem.M:
                 ctx._Mjac_p_vecs = {}
                 block_outputs = [dep.output for dep in ctx.block.get_outputs()]
                 for block_variable in ctx.block.get_dependencies():
                     coeff = block_variable.output
-                    if coeff in block_outputs:
+                    c_rep = block_variable.saved_output
+                    if coeff in block_outputs or (
+                        c_rep not in ctx._problem.M.coefficients()
+                    ):
                         continue
                     if isinstance(coeff, function.Function):
                         ctx._Mjac_p_vecs[coeff] = function.Function(
@@ -338,7 +343,8 @@ class DAESolver(OptionsManager, DAESolverMixin):
             # TODO, I think this function is only called if problem.M is not None anyways
             if self._problem.M:
                 ctx.set_quad_rhsjacobian(self.quad_ts)
-                ctx.set_quad_rhsjacobianP(self.quad_ts)
+                if ctx._Mjac_p_vecs:
+                    ctx.set_quad_rhsjacobianP(self.quad_ts)
 
     def _set_problem_eval_funcs(
         self, ctx, problem, nullspace, nullspace_T, near_nullspace
