@@ -102,6 +102,7 @@ class DAESolverMixin:
                     self._ad_tsvs._ctx.block = block
 
                 block._ad_tsvs = self._ad_tsvs
+                block.u0 = u0
                 tape.add_block(block)
 
             with stop_annotating():
