@@ -316,10 +316,14 @@ class DAESolver(OptionsManager, DAESolverMixin):
             ctx.set_quad_rhsjacobianP(self.quad_ts, zero)
         else:
             # Cache vectors for assembly of partial derivatives
-            if hasattr(ctx, "dependencies") and self._problem.M:
+            # TODO, the responsability for creating these vectors should be left for the context...
+            if ctx.block.get_dependencies() and self._problem.M:
                 ctx._Mjac_p_vecs = {}
-                for block_variable in ctx.dependencies:
+                block_outputs = [dep.output for dep in ctx.block.get_outputs()]
+                for block_variable in ctx.block.get_dependencies():
                     coeff = block_variable.output
+                    if coeff in block_outputs:
+                        continue
                     if isinstance(coeff, function.Function):
                         ctx._Mjac_p_vecs[coeff] = function.Function(
                             coeff.function_space()
@@ -396,6 +400,8 @@ class DAESolver(OptionsManager, DAESolverMixin):
 
         with self._problem.u.dat.vec_wo as u, u0.dat.vec as u0v:
             u0v.copy(u)
+        # This does not work here because you're changing within DAESolverMixin (in the recompute I believe.)
+        # This should be a responsability of the Block, right?
         self._ctx.u0 = u0
 
         # Necessary to reset the problem as ts.solve() starts from the last time step used.

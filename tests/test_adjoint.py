@@ -344,9 +344,9 @@ def test_combined_cost_function_adjoint():
 
 
 if __name__ == "__main__":
-    # test_integral_control_in_cost_function_adjoint()
+    test_integral_control_in_cost_function_adjoint("function")
     # test_integral_cost_function_adjoint()
-    test_integral_cost_function_recompute("function")
+    # test_integral_cost_function_recompute("function")
     # test_terminal_cost_function_adjoint()
     # test_combined_cost_function_adjoint()
     # test_initial_condition_recompute()

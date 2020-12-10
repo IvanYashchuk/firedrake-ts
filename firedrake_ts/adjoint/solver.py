@@ -98,8 +98,8 @@ class DAESolverMixin:
                         ),
                         **self._ad_kwargs,
                     )
-                    # Attach dependencies to context to access them from TSAdjoint
-                    self._ad_tsvs._ctx.dependencies = block.get_dependencies()
+                    # Attach block to context to access them from TSAdjoint
+                    self._ad_tsvs._ctx.block = block
 
                 block._ad_tsvs = self._ad_tsvs
                 tape.add_block(block)

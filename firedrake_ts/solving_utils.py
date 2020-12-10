@@ -239,7 +239,11 @@ class _TSContext(object):
             "y <- A' * x"
             y_ownership = y.getOwnershipRange()
             local_shift = 0
-            for block_variable in self.ctx.dependencies:
+            block_outputs = [dep.output for dep in self.ctx.block.get_outputs()]
+            for block_variable in self.ctx.block.get_dependencies():
+                coeff = block_variable.output
+                if coeff in block_outputs:
+                    continue
                 c_rep = block_variable.saved_output
                 if c_rep not in self.ctx._problem.F.coefficients():
                     continue
@@ -600,9 +604,9 @@ class _TSContext(object):
             X.copy(v)
         ctx._problem.time.assign(t)
 
-        if hasattr(ctx, "dependencies"):
+        if ctx.block.get_dependencies():
             local_shift = 0
-            for block_variable in ctx.dependencies:
+            for block_variable in ctx.block.get_dependencies():
                 c_rep = block_variable.saved_output
                 if c_rep not in ctx._problem.M.coefficients():
                     continue
@@ -767,8 +771,14 @@ class _TSContext(object):
 
         local_m_size = 0
         m = 0
-        for block_variable in self.dependencies:
+        block_outputs = [dep.output for dep in self.block.get_outputs()]
+        for block_variable in self.block.get_dependencies():
             coeff = block_variable.output
+            if coeff in block_outputs:
+                continue
+            # if self.u0:
+            #    if coeff == self.u0:
+            #        continue
             if isinstance(coeff, DirichletBC):
                 RuntimeWarning(
                     "DirichletBC control not supported, ignoring this dependency"
@@ -786,6 +796,7 @@ class _TSContext(object):
                 local_m_size += coeff.dat.data.size
                 m += coeff.function_space().dim()
 
+        print(f"jacobianP size: {m}")
         djdp_transposed_mat = PETSc.Mat().createDense([[local_m_size, m], [1, 1]])
         djdp_transposed_mat.setUp()
 
@@ -802,8 +813,11 @@ class _TSContext(object):
 
         local_m_size = 0
         m = 0
-        for block_variable in self.dependencies:
+        block_outputs = [dep.output for dep in self.block.get_outputs()]
+        for block_variable in self.block.get_dependencies():
             coeff = block_variable.output
+            if coeff in block_outputs:
+                continue
             if isinstance(coeff, DirichletBC):
                 RuntimeWarning(
                     "DirichletBC control not supported, ignoring this dependency"

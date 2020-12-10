@@ -102,6 +102,8 @@ class DAESolverBlock(GenericSolveBlock):
 
         local_shift = 0
         for idx, dep in relevant_dependencies:
+            # TODO this is working for now because self.u0 is the
+            # same than the state response
             if dep.output == self.u0:
                 if isinstance(input, float):
                     dep.add_adj_output(input * dJdu)
