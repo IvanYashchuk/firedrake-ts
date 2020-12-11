@@ -312,32 +312,34 @@ class DAESolver(OptionsManager, DAESolverMixin):
 
     # TODO change the name to refer to just the cost function jacobians
     def set_adjoint_jacobians(self, ctx, zero=False):
+        # Cache vectors for assembly of partial derivatives
+        # TODO, the responsability for creating these vectors should be left for the context...
+        # Same loop than in _Mjac_p and form_cost_jacobianP. It should all be the same
+        if ctx.block.get_dependencies() and self._problem.M:
+            ctx._Mjac_p_vecs = {}
+            block_outputs = [dep.output for dep in ctx.block.get_outputs()]
+            for block_variable in ctx.block.get_dependencies():
+                coeff = block_variable.output
+                c_rep = block_variable.saved_output
+                if coeff in block_outputs or (
+                    c_rep not in ctx._problem.M.coefficients()
+                ):
+                    continue
+                if isinstance(coeff, function.Function):
+                    ctx._Mjac_p_vecs[coeff] = function.Function(
+                        coeff.function_space()
+                    )
+                elif isinstance(coeff, Constant):
+                    mesh = self._problem.F.ufl_domain()
+                    ctx._Mjac_p_vecs[coeff] = function.Function(
+                        coeff._ad_function_space(mesh)
+                    )
         if zero:
-            ctx.set_quad_rhsjacobian(self.quad_ts, zero)
-            ctx.set_quad_rhsjacobianP(self.quad_ts, zero)
+            if self._problem.M:
+                ctx.set_quad_rhsjacobian(self.quad_ts, zero)
+                if ctx._Mjac_p_vecs:
+                    ctx.set_quad_rhsjacobianP(self.quad_ts, zero)
         else:
-            # Cache vectors for assembly of partial derivatives
-            # TODO, the responsability for creating these vectors should be left for the context...
-            # Same loop than in _Mjac_p and form_cost_jacobianP. It should all be the same
-            if ctx.block.get_dependencies() and self._problem.M:
-                ctx._Mjac_p_vecs = {}
-                block_outputs = [dep.output for dep in ctx.block.get_outputs()]
-                for block_variable in ctx.block.get_dependencies():
-                    coeff = block_variable.output
-                    c_rep = block_variable.saved_output
-                    if coeff in block_outputs or (
-                        c_rep not in ctx._problem.M.coefficients()
-                    ):
-                        continue
-                    if isinstance(coeff, function.Function):
-                        ctx._Mjac_p_vecs[coeff] = function.Function(
-                            coeff.function_space()
-                        )
-                    elif isinstance(coeff, Constant):
-                        mesh = self._problem.F.ufl_domain()
-                        ctx._Mjac_p_vecs[coeff] = function.Function(
-                            coeff._ad_function_space(mesh)
-                        )
             # This functionality is only useful for TSAdjoint
             # TODO possibly to put setSaveTrajectory here as well
             # TODO, I think this function is only called if problem.M is not None anyways

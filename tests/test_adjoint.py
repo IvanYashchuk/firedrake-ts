@@ -6,6 +6,7 @@ import firedrake_ts
 import numpy as np
 
 petsc4py.PETSc.Sys.popErrorHandler()
+print = lambda x: PETSc.Sys.Print(x, comm=COMM_SELF)
 
 
 @pytest.mark.parametrize("control", ["constant", "function"])
@@ -13,21 +14,22 @@ def test_integral_cost_function_recompute(control):
 
     mesh = UnitIntervalMesh(10)
     V = FunctionSpace(mesh, "P", 1)
+    x = SpatialCoordinate(mesh)
 
     u = Function(V)
     u_t = Function(V)
     v = TestFunction(V)
+    a = Function(V).interpolate(sin(x[0]))
     if control == "constant":
         f = Constant(5.0)
     elif control == "function":
         f = Function(V).interpolate(Constant(5.0))
     else:
         f = Function(V).interpolate(Constant(5.0))
-    F = inner(u_t, v) * dx + inner(grad(u), grad(v)) * dx - f * v * dx
+    F = inner(u_t, v) * dx + inner(grad(u), grad(v)) * dx - a * f * v * dx
 
     bc = DirichletBC(V, 0.0, "on_boundary")
 
-    x = SpatialCoordinate(mesh)
     bump = conditional(lt(abs(x[0] - 0.5), 0.1), 1.0, 0.0)
     u.interpolate(bump)
     M = u * u * dx
@@ -49,7 +51,6 @@ def test_integral_cost_function_recompute(control):
 
     c = Control(f)
     Jhat = ReducedFunctional(m, c)
-    print(f"Second m: {Jhat(f)}")
     m2 = Jhat(f)
     assert np.allclose(m, m2, 1e-8)
 
@@ -90,7 +91,6 @@ def test_initial_condition_recompute():
 
     c = Control(ic)
     Jhat = ReducedFunctional(m, c)
-    print(f"Second m: {Jhat(ic)}")
     m2 = Jhat(ic)
     assert np.allclose(m, m2, 1e-8)
 
@@ -133,9 +133,8 @@ def test_initial_condition_adjoint():
 
     c = Control(ic)
     Jhat = ReducedFunctional(m, c)
-    print(f"Second m: {Jhat(ic)}")
+    Jhat(ic)
     djdf_adjoint = Jhat.derivative()
-    print(f"derivative {djdf_adjoint.dat.data}")
 
     h = Function(V).interpolate(Constant(1.0))
     assert taylor_test(Jhat, ic, h) > 1.9
@@ -146,6 +145,7 @@ def test_integral_cost_function_adjoint(control):
 
     mesh = UnitIntervalMesh(10)
     V = FunctionSpace(mesh, "P", 1)
+    comm = mesh.comm
 
     u = Function(V)
     u_t = Function(V)
@@ -183,13 +183,11 @@ def test_integral_cost_function_adjoint(control):
     solver = firedrake_ts.DAESolver(problem, solver_parameters=params)
 
     u, m = solver.solve(u)
-    print(f"First m: {m}")
 
     c = Control(f)
     Jhat = ReducedFunctional(m, c)
-    print(f"Second m: {Jhat(f)}")
+    Jhat(f)
     djdf_adjoint = Jhat.derivative()
-    print(f"derivative {djdf_adjoint.dat.data}")
 
     assert taylor_test(Jhat, f, h) > 1.9
 
@@ -199,6 +197,7 @@ def test_integral_control_in_cost_function_adjoint(control):
 
     mesh = UnitIntervalMesh(10)
     V = FunctionSpace(mesh, "P", 1)
+    comm = mesh.comm
 
     u = Function(V)
     u_t = Function(V)
@@ -237,13 +236,12 @@ def test_integral_control_in_cost_function_adjoint(control):
     solver = firedrake_ts.DAESolver(problem, solver_parameters=params)
 
     u, m = solver.solve(u)
-    print(f"First m: {m}")
 
     c = Control(f)
     Jhat = ReducedFunctional(m, c)
-    print(f"Second m: {Jhat(f)}")
+
+    Jhat(f)
     djdf_adjoint = Jhat.derivative()
-    print(f"derivative {djdf_adjoint.dat.data}")
 
     assert taylor_test(Jhat, f, h) > 1.9
 
@@ -283,9 +281,8 @@ def test_terminal_cost_function_adjoint():
 
     c = Control(f)
     Jhat = ReducedFunctional(J, c)
-    print(f"Second m: {Jhat(f)}")
+    Jhat(f)
     djdf_adjoint = Jhat.derivative()
-    print(f"derivative {djdf_adjoint.dat.data}")
 
     h = Function(V).interpolate(Constant(1.0e1))
     assert taylor_test(Jhat, f, h) > 1.9
@@ -327,9 +324,8 @@ def test_combined_cost_function_adjoint():
 
     J = assemble(u * u * dx)
     Jhat = ReducedFunctional(J, c)
-    print(f"Second m: {Jhat(f)}")
+    Jhat(f)
     djdf_adjoint = Jhat.derivative()
-    print(f"derivative J {djdf_adjoint.dat.data}")
 
     h = Function(V).interpolate(Constant(1.0e1))
     assert taylor_test(Jhat, f, h) > 1.9
@@ -337,17 +333,19 @@ def test_combined_cost_function_adjoint():
     Ghat = ReducedFunctional(m, c)
     Ghat(f)
     dgdf_adjoint = Ghat.derivative()
-    print(f"derivative G {dgdf_adjoint.dat.data}")
 
     h = Function(V).interpolate(Constant(1.0e1))
     assert taylor_test(Ghat, f, h) > 1.9
 
 
 if __name__ == "__main__":
+    test_integral_cost_function_adjoint("function")
     test_integral_control_in_cost_function_adjoint("function")
-    # test_integral_cost_function_adjoint()
-    # test_integral_cost_function_recompute("function")
-    # test_terminal_cost_function_adjoint()
-    # test_combined_cost_function_adjoint()
-    # test_initial_condition_recompute()
-    # test_initial_condition_adjoint()
+    test_integral_cost_function_recompute("function")
+    test_integral_cost_function_adjoint("constant")
+    test_integral_control_in_cost_function_adjoint("constant")
+    test_integral_cost_function_recompute("constant")
+    test_terminal_cost_function_adjoint()
+    test_combined_cost_function_adjoint()
+    test_initial_condition_recompute()
+    test_initial_condition_adjoint()

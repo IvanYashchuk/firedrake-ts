@@ -99,12 +99,10 @@ class DAESolverBlock(GenericSolveBlock):
         problem.udot = revs_assign_map_F[problem.udot]
 
         dJdu, dJdf = self._ad_tsvs.get_cost_gradients()
-        y_ownership = dJdf.getOwnershipRange()
+        dJdf_ownership = dJdf.getOwnershipRange()
 
         local_shift = 0
         for idx, dep in relevant_dependencies:
-            # TODO this is working for now because self.u0 is the
-            # same than the state response
             if dep.output == self.u0:
                 if isinstance(input, float):
                     dep.add_adj_output(input * dJdu)
@@ -131,9 +129,9 @@ class DAESolverBlock(GenericSolveBlock):
                 with tmp.dat.vec as y_vec:
                     local_range = y_vec.getOwnershipRange()
                     local_size = local_range[1] - local_range[0]
-                    y_vec[:] = dJdf[
-                        (y_ownership[0] + local_shift) : (
-                            y_ownership[0] + local_shift + local_size
+                    y_vec[local_range[0] : local_range[1]] = dJdf[
+                        (dJdf_ownership[0] + local_shift) : (
+                            dJdf_ownership[0] + local_shift + local_size
                         )
                     ]
                 local_shift += local_size

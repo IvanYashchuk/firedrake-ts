@@ -29,8 +29,6 @@ def _make_reasons(reasons):
 
 TSReasons = _make_reasons(PETSc.TS.ConvergedReason())
 
-print = lambda x: PETSc.Sys.Print(x)
-
 
 def check_ts_convergence(ts):
     r = ts.getConvergedReason()
@@ -309,13 +307,16 @@ class _TSContext(object):
     def set_cost_gradients(self, ts, adj_input=None):
 
         self._dMdp.zeroEntries()
-        self._dMdx.zeroEntries()
+        with self._dMdx.dat.vec as dMdx_vec:
+            dMdx_vec.zeroEntries()
         if isinstance(adj_input, vector.Vector):
             bcs = (homogenize(self.bcs_J),)
             bcs[0][0].apply(adj_input)  # TODO what if Dirichlet is a control
-            with adj_input.dat.vec_ro as adj_vec:
-                adj_vec.copy(self._dMdx)
-        ts.setCostGradients(self._dMdx, self._dMdp)
+            with adj_input.dat.vec_ro as adj_vec, self._dMdx.dat.vec as dmdx_vec:
+                adj_vec.copy(dmdx_vec)
+
+        with self._dMdx.dat.vec as dMdu_vec:
+            ts.setCostGradients(dMdu_vec, self._dMdp)
 
     def set_nullspace(self, nullspace, ises=None, transpose=False, near=False):
         if nullspace is None:
@@ -565,6 +566,7 @@ class _TSContext(object):
             bcs=homogenize(ctx.bcs_J),
         )
         Jmat_array = J.getDenseArray()
+        # Here we're getting only the local copy with getDenseArray
         with ctx._Mjac_x_vec.dat.vec_ro as v:
             Jmat_array[:, 0] = v.array[:]
         J.assemble()
@@ -608,10 +610,9 @@ class _TSContext(object):
             local_shift = 0
             for i, block_variable in enumerate(ctx.block.get_dependencies()):
                 c_rep = block_variable.saved_output
-                print(f"index: {i}")
+                coeff = block_variable.output
                 if c_rep not in ctx._problem.M.coefficients():
                     continue
-                print(f"Local shift arriba: {local_shift}")
                 if isinstance(c_rep, function.Function):
                     trial_function = TestFunction(c_rep.function_space())
                 elif isinstance(c_rep, Constant):
@@ -628,28 +629,22 @@ class _TSContext(object):
                     )
                     continue
 
-                coeff = block_variable.output
                 assemble(
                     derivative(ctx._problem.M, c_rep, trial_function),
                     tensor=ctx._Mjac_p_vecs[coeff],
                 )
 
                 J_ownership = J.getOwnershipRange()
-                Jmat_array = J.getDenseArray()
                 with ctx._Mjac_p_vecs[coeff].dat.vec_ro as v:
                     local_range = v.getOwnershipRange()
                     local_size = local_range[1] - local_range[0]
-                    print(f"Local shift: {local_shift}, local size: {local_size}")
-                    print(f"v.array_r size: {v.array_r.size}")
-                    print(f"Jmat array: {Jmat_array.size}")
-                    Jmat_array[
+                    J[
                         (J_ownership[0] + local_shift) : (
                             J_ownership[0] + local_shift + local_size
                         ),
                         0,
                     ] = v.array_r
                     local_shift += local_size
-                    print(f"Local shift eing: {local_shift}")
             J.assemble()
 
     @staticmethod
@@ -767,6 +762,7 @@ class _TSContext(object):
             [[local_dofs, self._Mjac_x_vec.ufl_function_space().dim()], [1, 1]]
         )
         djdu_transposed_mat.setUp()
+        # djdu_transposed_mat.assemble()
 
         return djdu_transposed_mat
 
@@ -803,9 +799,9 @@ class _TSContext(object):
                 local_m_size += coeff.dat.data.size
                 m += coeff.function_space().dim()
 
-        print(f"jacobianP size: {m}")
         djdp_transposed_mat = PETSc.Mat().createDense([[local_m_size, m], [1, 1]])
         djdp_transposed_mat.setUp()
+        # djdp_transposed_mat.assemble()
 
         return djdp_transposed_mat
 
@@ -843,7 +839,6 @@ class _TSContext(object):
             else:
                 local_m_size += coeff.dat.data.size
                 m += coeff.function_space().dim()
-        print(f"dFdp sizes: {n}, {m}")
         J = PETSc.Mat().createAIJ([[local_n_size, n], [local_m_size, m]])
         J.setType("python")
         shell = self.RHSJacPShell(self)
@@ -854,7 +849,7 @@ class _TSContext(object):
 
     @cached_property
     def _dMdx(self):
-        return self._Mjac_x.createVecLeft()
+        return function.Function(self._problem.F.arguments()[0].function_space())
 
     @cached_property
     def _dMdp(self):
