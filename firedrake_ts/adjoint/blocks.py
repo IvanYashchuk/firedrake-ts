@@ -3,7 +3,7 @@ from firedrake.adjoint.blocks import GenericSolveBlock, solve_init_params
 from firedrake import Constant, DirichletBC, function, vector
 from firedrake.mesh import MeshGeometry
 from numpy.lib.arraysetops import isin
-from pyadjoint.tape import stop_annotating
+from pyadjoint.tape import no_annotations, stop_annotating
 import ufl
 
 import firedrake_ts
@@ -35,6 +35,15 @@ class DAESolverBlock(GenericSolveBlock):
         super()._init_solver_parameters(args, kwargs)
         solve_init_params(self, args, kwargs, varform=True)
 
+    @no_annotations
+    def evaluate_tlm():
+        raise NotImplementedError("TLM sensitivities are not implemented")
+
+    @no_annotations
+    def evaluate_hessian():
+        raise NotImplementedError("TLM sensitivities are not implemented")
+
+    @no_annotations
     def evaluate_adj(self, markings):
         outputs = self.get_outputs()
         adj_inputs = []
