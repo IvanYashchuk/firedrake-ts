@@ -148,13 +148,12 @@ class DAESolverBlock(GenericSolveBlock):
     def recompute_component(self, inputs, block_variable, idx, prepared):
         from firedrake import Function
 
-        self._ad_tsvs_replace_forms()
+        problem = self._ad_tsvs._problem
+        u_func = self.backend.Function(problem.u.function_space())
+        velfunc = self.backend.Function(problem.u.function_space())
+        self._ad_tsvs_replace_forms(u_func, velfunc)
         self._ad_tsvs.parameters.update(self.solver_params)
         u = self._ad_tsvs._problem.u
-        # Pyadjoint uses the output as the new checkpoint.
-        # We're providing a new one. TODO does it make sense?
-        # It should not, since you're not recording
-        u_func = u.copy(deepcopy=True)
 
         if self._ad_tsvs._problem.M:
             u_func, m = self._ad_tsvs.solve(u_func)
@@ -201,10 +200,8 @@ class DAESolverBlock(GenericSolveBlock):
         for coeff, value in assign_map.items():
             coeff.assign(value)
 
-    def _ad_tsvs_replace_forms(self):
+    def _ad_tsvs_replace_forms(self, func, velfunc):
         problem = self._ad_tsvs._problem
-        func = self.backend.Function(problem.u.function_space())
-        velfunc = self.backend.Function(problem.u.function_space())
         self._ad_assign_coefficients(problem.F, func, velfunc)
         # TODO is there a better way to avoid checking for this property everywhere?
         if hasattr(problem, "M") and problem.M:
