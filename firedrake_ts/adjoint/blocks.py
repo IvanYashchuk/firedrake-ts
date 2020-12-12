@@ -147,9 +147,9 @@ class DAESolverBlock(GenericSolveBlock):
                 if tmp is not None:
                     # Whether the output is the solution or the integral
                     if isinstance(input, float):
-                        dep.add_adj_output(input * tmp)
+                        dep.add_adj_output(input * tmp.vector())
                     else:
-                        dep.add_adj_output(tmp)
+                        dep.add_adj_output(tmp.vector())
 
     def prepare_recompute_component(self, inputs, relevant_outputs):
         pass
