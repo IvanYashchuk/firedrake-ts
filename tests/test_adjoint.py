@@ -9,6 +9,59 @@ petsc4py.PETSc.Sys.popErrorHandler()
 print = lambda x: PETSc.Sys.Print(x, comm=COMM_SELF)
 
 
+@pytest.mark.skip()
+@pytest.mark.parametrize("control", ["constant", "function"])
+def test_burgers(control):
+
+    n = 30
+    mesh = UnitSquareMesh(n, n)
+    V = VectorFunctionSpace(mesh, "CG", 2)
+    RHO = FunctionSpace(mesh, "DG", 0)
+    x = SpatialCoordinate(mesh)
+
+    u = Function(V)
+    u_t = Function(V)
+    v = TestFunction(V)
+    if control == "constant":
+        a = Constant(5.0)
+    elif control == "function":
+        a = Function(RHO).interpolate(sin(x[0]))
+    else:
+        a = Function(RHO).interpolate(sin(x[0]))
+    F = (
+        inner(u_t, v) + inner(dot(u, nabla_grad(u)), v) + a * inner(grad(u), grad(v))
+    ) * dx
+
+    bc = DirichletBC(V, 0.0, "on_boundary")
+
+    ic = project(as_vector([sin(pi * x[0]), 0]), V)
+    u.interpolate(ic)
+    M = inner(u, u) * dx
+
+    params = {
+        "mat_type": "aij",
+        "ksp_type": "preonly",
+        "pc_type": "lu",
+        "ts_type": "theta",
+        "ts_theta_theta": 0.5,
+        "ts_exact_final_time": "matchstep",
+    }
+
+    dt = 1e-1
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), dt, bcs=bc, M=M)
+    solver = firedrake_ts.DAESolver(problem, solver_parameters=params)
+
+    u, m = solver.solve(u)
+
+    c = Control(a)
+    Jhat = ReducedFunctional(m, c)
+    m2 = Jhat(a)
+    assert np.allclose(m, m2, 1e-8)
+
+    h = Function(RHO).interpolate(Constant(1.0))
+    assert taylor_test(Jhat, a, h) > 1.9
+
+
 @pytest.mark.parametrize("control", ["constant", "function"])
 def test_integral_cost_function_recompute(control):
 
@@ -339,13 +392,14 @@ def test_combined_cost_function_adjoint():
 
 
 if __name__ == "__main__":
-    test_integral_cost_function_adjoint("function")
-    test_integral_control_in_cost_function_adjoint("function")
-    test_integral_cost_function_recompute("function")
-    test_integral_cost_function_adjoint("constant")
-    test_integral_control_in_cost_function_adjoint("constant")
-    test_integral_cost_function_recompute("constant")
-    test_terminal_cost_function_adjoint()
-    test_combined_cost_function_adjoint()
-    test_initial_condition_recompute()
+    # test_integral_cost_function_adjoint("function")
+    # test_integral_control_in_cost_function_adjoint("function")
+    # test_integral_cost_function_recompute("function")
+    # test_integral_cost_function_adjoint("constant")
+    # test_integral_control_in_cost_function_adjoint("constant")
+    # test_integral_cost_function_recompute("constant")
+    # test_terminal_cost_function_adjoint()
+    # test_combined_cost_function_adjoint()
+    # test_initial_condition_recompute()
     test_initial_condition_adjoint()
+    # test_burgers("function")
