@@ -9,9 +9,22 @@ petsc4py.PETSc.Sys.popErrorHandler()
 print = lambda x: PETSc.Sys.Print(x, comm=COMM_SELF)
 
 
+@pytest.fixture
+def solver_parameters():
+    return {
+        "mat_type": "aij",
+        "ksp_type": "preonly",
+        "pc_type": "lu",
+        "ts_type": "theta",
+        "ts_dt": 0.1,
+        "ts_theta_theta": 0.5,
+        "ts_theta_endpoint": None,
+    }
+
+
 @pytest.mark.skip()
 @pytest.mark.parametrize("control", ["constant", "function"])
-def test_burgers(control):
+def test_burgers(control, solver_parameters):
 
     n = 30
     mesh = UnitSquareMesh(n, n)
@@ -38,18 +51,8 @@ def test_burgers(control):
     u.interpolate(ic)
     M = inner(u, u) * dx
 
-    params = {
-        "mat_type": "aij",
-        "ksp_type": "preonly",
-        "pc_type": "lu",
-        "ts_type": "theta",
-        "ts_theta_theta": 0.5,
-        "ts_exact_final_time": "matchstep",
-    }
-
-    dt = 1e-1
-    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), dt, bcs=bc, M=M)
-    solver = firedrake_ts.DAESolver(problem, solver_parameters=params)
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc, M=M)
+    solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
     u, m = solver.solve(u)
 
@@ -63,7 +66,7 @@ def test_burgers(control):
 
 
 @pytest.mark.parametrize("control", ["constant", "function"])
-def test_integral_cost_function_recompute(control):
+def test_integral_cost_function_recompute(control, solver_parameters):
 
     mesh = UnitIntervalMesh(10)
     V = FunctionSpace(mesh, "P", 1)
@@ -87,18 +90,8 @@ def test_integral_cost_function_recompute(control):
     u.interpolate(bump)
     M = u * u * dx
 
-    params = {
-        "mat_type": "aij",
-        "ksp_type": "preonly",
-        "pc_type": "lu",
-        "ts_type": "theta",
-        "ts_theta_theta": 0.5,
-        "ts_exact_final_time": "matchstep",
-    }
-
-    dt = 1e-1
-    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), dt, bcs=bc, M=M)
-    solver = firedrake_ts.DAESolver(problem, solver_parameters=params)
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc, M=M)
+    solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
     u, m = solver.solve(u)
 
@@ -108,7 +101,7 @@ def test_integral_cost_function_recompute(control):
     assert np.allclose(m, m2, 1e-8)
 
 
-def test_initial_condition_recompute():
+def test_initial_condition_recompute(solver_parameters):
 
     mesh = UnitIntervalMesh(10)
     V = FunctionSpace(mesh, "P", 1)
@@ -127,18 +120,8 @@ def test_initial_condition_recompute():
     u.assign(ic)
     M = u * u * dx
 
-    params = {
-        "mat_type": "aij",
-        "ksp_type": "preonly",
-        "pc_type": "lu",
-        "ts_type": "theta",
-        "ts_theta_theta": 0.5,
-        "ts_exact_final_time": "matchstep",
-    }
-
-    dt = 1e-1
-    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), dt, bcs=bc, M=M)
-    solver = firedrake_ts.DAESolver(problem, solver_parameters=params)
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc, M=M)
+    solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
     u, m = solver.solve(u)
 
@@ -148,7 +131,7 @@ def test_initial_condition_recompute():
     assert np.allclose(m, m2, 1e-8)
 
 
-def test_initial_condition_adjoint():
+def test_initial_condition_adjoint(solver_parameters):
 
     mesh = UnitIntervalMesh(10)
     V = FunctionSpace(mesh, "P", 1)
@@ -167,19 +150,8 @@ def test_initial_condition_adjoint():
     ic.interpolate(bump)
     u.assign(ic)
 
-    params = {
-        "mat_type": "aij",
-        "ksp_type": "preonly",
-        "pc_type": "lu",
-        "ts_type": "theta",
-        "ts_theta_theta": 0.5,
-        "ts_exact_final_time": "matchstep",
-        # "ts_adjoint_monitor_sensi": None,
-    }
-
-    dt = 1e-1
-    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), dt, bcs=bc)
-    solver = firedrake_ts.DAESolver(problem, solver_parameters=params)
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc)
+    solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
     u_fin = solver.solve(u)
     m = assemble(u_fin * u_fin * dx)
@@ -194,7 +166,7 @@ def test_initial_condition_adjoint():
 
 
 @pytest.mark.parametrize("control", ["constant", "function"])
-def test_integral_cost_function_adjoint(control):
+def test_integral_cost_function_adjoint(control, solver_parameters):
 
     mesh = UnitIntervalMesh(10)
     V = FunctionSpace(mesh, "P", 1)
@@ -222,18 +194,8 @@ def test_integral_cost_function_adjoint(control):
     u.interpolate(bump)
     M = u * u * dx
 
-    params = {
-        "mat_type": "aij",
-        "ksp_type": "preonly",
-        "pc_type": "lu",
-        "ts_type": "theta",
-        "ts_theta_theta": 0.5,
-        "ts_exact_final_time": "matchstep",
-    }
-
-    dt = 1e-1
-    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), dt, bcs=bc, M=M)
-    solver = firedrake_ts.DAESolver(problem, solver_parameters=params)
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc, M=M)
+    solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
     u, m = solver.solve(u)
 
@@ -246,7 +208,7 @@ def test_integral_cost_function_adjoint(control):
 
 
 @pytest.mark.parametrize("control", ["constant", "function"])
-def test_integral_control_in_cost_function_adjoint(control):
+def test_integral_control_in_cost_function_adjoint(control, solver_parameters):
 
     mesh = UnitIntervalMesh(10)
     V = FunctionSpace(mesh, "P", 1)
@@ -275,18 +237,8 @@ def test_integral_control_in_cost_function_adjoint(control):
     u.interpolate(bump)
     M = u * u * f * f * dx
 
-    params = {
-        "mat_type": "aij",
-        "ksp_type": "preonly",
-        "pc_type": "lu",
-        "ts_type": "theta",
-        "ts_theta_theta": 0.5,
-        "ts_exact_final_time": "matchstep",
-    }
-
-    dt = 1e-1
-    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), dt, bcs=bc, M=M)
-    solver = firedrake_ts.DAESolver(problem, solver_parameters=params)
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc, M=M)
+    solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
     u, m = solver.solve(u)
 
@@ -299,7 +251,7 @@ def test_integral_control_in_cost_function_adjoint(control):
     assert taylor_test(Jhat, f, h) > 1.9
 
 
-def test_terminal_cost_function_adjoint():
+def test_terminal_cost_function_adjoint(solver_parameters):
 
     mesh = UnitIntervalMesh(10)
     V = FunctionSpace(mesh, "P", 1)
@@ -315,18 +267,9 @@ def test_terminal_cost_function_adjoint():
     x = SpatialCoordinate(mesh)
     bump = conditional(lt(abs(x[0] - 0.5), 0.1), 1.0, 0.0)
     u.interpolate(bump)
-    params = {
-        "mat_type": "aij",
-        "ksp_type": "preonly",
-        "pc_type": "lu",
-        "ts_type": "theta",
-        "ts_theta_theta": 0.5,
-        "ts_theta_endpoint": None,
-    }
 
-    dt = 1e-1
-    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), dt, bcs=bc)
-    solver = firedrake_ts.DAESolver(problem, solver_parameters=params)
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc)
+    solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
     u = solver.solve(u)
 
@@ -341,7 +284,7 @@ def test_terminal_cost_function_adjoint():
     assert taylor_test(Jhat, f, h) > 1.9
 
 
-def test_combined_cost_function_adjoint():
+def test_combined_cost_function_adjoint(solver_parameters):
 
     mesh = UnitIntervalMesh(10)
     V = FunctionSpace(mesh, "P", 1)
@@ -357,19 +300,10 @@ def test_combined_cost_function_adjoint():
     x = SpatialCoordinate(mesh)
     bump = conditional(lt(abs(x[0] - 0.5), 0.1), 1.0, 0.0)
     u.interpolate(bump)
-    params = {
-        "mat_type": "aij",
-        "ksp_type": "preonly",
-        "pc_type": "lu",
-        "ts_type": "theta",
-        "ts_theta_theta": 0.5,
-        "ts_theta_endpoint": None,
-    }
 
     M = u * u * dx
-    dt = 1e-1
-    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), dt, bcs=bc, M=M)
-    solver = firedrake_ts.DAESolver(problem, solver_parameters=params)
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc, M=M)
+    solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
     u, m = solver.solve(u)
 
