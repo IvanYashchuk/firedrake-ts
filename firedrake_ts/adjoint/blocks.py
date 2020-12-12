@@ -11,7 +11,7 @@ import firedrake_ts
 
 class DAESolverBlock(GenericSolveBlock):
     def __init__(
-        self, F, u, udot, tspan, dt, bcs, M, u0, solver_params, solver_kwargs, **kwargs
+        self, F, u, udot, tspan, bcs, M, u0, solver_params, solver_kwargs, **kwargs
     ):
         self.solver_params = solver_params.copy()
         self.solver_kwargs = solver_kwargs

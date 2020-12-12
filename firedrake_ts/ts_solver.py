@@ -70,7 +70,6 @@ class DAEProblem(DAEProblemMixin):
         u,
         udot,
         tspan,
-        dt,
         time=None,
         bcs=None,
         J=None,
@@ -130,7 +129,6 @@ class DAEProblem(DAEProblemMixin):
         self.time = time or Constant(0.0)
         # timeshift value provided by the solver
         self.shift = Constant(1.0)
-        self.dt = dt
 
         # Use the user-provided Jacobian. If none is provided, derive
         # the Jacobian from the residual.
@@ -273,9 +271,7 @@ class DAESolver(OptionsManager, DAESolverMixin):
 
         self.ts.setMonitor(monitor_callback)
 
-        self.dt = problem.dt
         self.tspan = problem.tspan
-        self.ts.setTimeStep(self.dt)
         self.ts.setTime(problem.tspan[0])
         self.ts.setMaxTime(problem.tspan[1])
         self.ts.setEquationType(PETSc.TS.EquationType.IMPLICIT)
@@ -306,6 +302,8 @@ class DAESolver(OptionsManager, DAESolverMixin):
         with dmhooks.add_hooks(dm, self, appctx=self._ctx, save=False):
             self.set_from_options(self.ts)
 
+        # Necessary to reset the problem as ts.solve() starts from the last time step used.
+        self._dt = self.ts.getTimeStep()
         # Used for custom grid transfer.
         self._transfer_operators = ()
         self._setup = False
@@ -326,9 +324,7 @@ class DAESolver(OptionsManager, DAESolverMixin):
                 ):
                     continue
                 if isinstance(coeff, function.Function):
-                    ctx._Mjac_p_vecs[coeff] = function.Function(
-                        coeff.function_space()
-                    )
+                    ctx._Mjac_p_vecs[coeff] = function.Function(coeff.function_space())
                 elif isinstance(coeff, Constant):
                     mesh = self._problem.F.ufl_domain()
                     ctx._Mjac_p_vecs[coeff] = function.Function(
@@ -410,7 +406,7 @@ class DAESolver(OptionsManager, DAESolverMixin):
             u0v.copy(u)
 
         # Necessary to reset the problem as ts.solve() starts from the last time step used.
-        self.ts.setTimeStep(self.dt)
+        self.ts.setTimeStep(self._dt)
         self.ts.setTime(self.tspan[0])
         self.ts.setStepNumber(0)
         if self._problem.M:

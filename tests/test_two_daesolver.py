@@ -18,9 +18,7 @@ def test_two_ts():
     bump = conditional(lt(abs(x[0] - 0.5), 0.1), 1.0, 0.0)
     u.interpolate(bump)
 
-
-    dt = 2e-2
-    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 1.0), dt, bcs=bc)
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 1.0), bcs=bc)
     solver = firedrake_ts.DAESolver(problem)
 
     V2 = FunctionSpace(mesh, "P", 1)
@@ -30,8 +28,7 @@ def test_two_ts():
     F2 = inner(u_t2, v) * dx + inner(grad(u2), grad(v)) * dx - 1.0 * v * dx
     bc2 = DirichletBC(V2, 0.0, "on_boundary")
 
-
-    problem2 = firedrake_ts.DAEProblem(F2, u2, u_t2, (0.0, 1.0), dt, bcs=bc2)
+    problem2 = firedrake_ts.DAEProblem(F2, u2, u_t2, (0.0, 1.0), bcs=bc2)
     solver2 = firedrake_ts.DAESolver(problem2)
 
     solver.solve()

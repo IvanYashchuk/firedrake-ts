@@ -24,7 +24,6 @@ class DAEProblemMixin:
             self._ad_u = self.u
             self._ad_udot = self.udot
             self._ad_tspan = self.tspan
-            self._ad_dt = self.dt
             self._ad_bcs = self.bcs
             self._ad_J = self.J
             if self.M:
@@ -80,7 +79,6 @@ class DAESolverMixin:
                     problem._ad_u,
                     problem._ad_udot,
                     problem._ad_tspan,
-                    problem._ad_dt,
                     problem._ad_bcs,
                     problem._ad_M,
                     u0=u0,
@@ -187,7 +185,6 @@ class DAESolverMixin:
             F_replace_map[problem.u],
             F_replace_map[problem.udot],
             problem._ad_tspan,
-            problem._ad_dt,
             bcs=problem.bcs,
             M=M_rep,
             # J=replace(problem.J, J_replace_map),
