@@ -82,6 +82,7 @@ class DAESolverMixin:
                     problem._ad_bcs,
                     problem._ad_M,
                     u0=u0,
+                    problem_J=problem._ad_J,
                     solver_params=self.parameters,
                     solver_kwargs=self._ad_kwargs,
                     **sb_kwargs,
@@ -140,7 +141,8 @@ class DAESolverMixin:
         M_replace_map = {}
 
         F_coefficients = problem.F.coefficients()
-        J_coefficients = problem.J.coefficients()
+        if problem.J:
+            J_coefficients = problem.J.coefficients()
         # TODO is there a better way to avoid checking for this property everywhere?
         if hasattr(problem, "M") and problem.M:
             M_coefficients = problem.M.coefficients()
@@ -155,7 +157,7 @@ class DAESolverMixin:
                     F_replace_map[coeff] = coeff.copy(deepcopy=True)
                 _ad_count_map[F_replace_map[coeff]] = coeff.count()
 
-            if coeff in J_coefficients and coeff not in J_replace_map:
+            if problem.J and coeff in J_coefficients and coeff not in J_replace_map:
                 if coeff in F_replace_map:
                     J_replace_map[coeff] = F_replace_map[coeff]
                 elif isinstance(coeff, Constant):
@@ -180,6 +182,10 @@ class DAESolverMixin:
             M_rep = replace(problem.M, M_replace_map)
         else:
             M_rep = None
+        if problem.J:
+            J_repl = replace(problem.J, J_replace_map)
+        else:
+            J_repl = None
         tsvp = DAEProblem(
             replace(problem.F, F_replace_map),
             F_replace_map[problem.u],
@@ -187,7 +193,7 @@ class DAESolverMixin:
             problem._ad_tspan,
             bcs=problem.bcs,
             M=M_rep,
-            # J=replace(problem.J, J_replace_map),
+            J=J_repl,
         )
         tsvp._ad_count_map_update(_ad_count_map)
 

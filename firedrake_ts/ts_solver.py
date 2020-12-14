@@ -16,33 +16,33 @@ from firedrake_ts.solving_utils import check_ts_convergence, _TSContext
 from firedrake_ts.adjoint import DAESolverMixin, DAEProblemMixin
 
 
-def check_forms(F, J, Jp, M, m):
+def check_forms(F, J=None, Jp=None, M=None):
     if not isinstance(F, (ufl.Form, slate.TensorBase)):
         raise TypeError(
             f"Provided residual is a '{type(F).__name__}', not a Form or Slate Tensor"
         )
     if len(F.arguments()) != 1:
         raise ValueError("Provided residual is not a linear form")
-    if not isinstance(J, (ufl.Form, slate.TensorBase)):
+    if J and not isinstance(J, (ufl.Form, slate.TensorBase)):
         raise TypeError(
             f"Provided Jacobian is a '{type(J).__name__}', not a Form or Slate Tensor"
         )
-    if len(J.arguments()) != 2:
+    if J and len(J.arguments()) != 2:
         raise ValueError("Provided Jacobian is not a bilinear form")
 
-    if Jp is not None and not isinstance(Jp, (ufl.Form, slate.TensorBase)):
+    if Jp and not isinstance(Jp, (ufl.Form, slate.TensorBase)):
         raise TypeError(
             f"Provided preconditioner is a '{type(Jp).__name__}', not a Form or Slate Tensor"
         )
 
-    if Jp is not None and len(Jp.arguments()) != 2:
+    if Jp and len(Jp.arguments()) != 2:
         raise ValueError("Provided preconditioner is not a bilinear form")
 
-    if M is not None and not isinstance(M, ufl.Form):
+    if M and not isinstance(M, ufl.Form):
         raise TypeError(
             "Provided Functional M is a '%s', not a ufl.Form" % type(M).__name__
         )
-    if M is not None and M.arguments():
+    if M and M.arguments():
         raise ValueError(
             "Provided Functional M is contains a TestFunction or a TrialFunction"
         )
@@ -108,13 +108,11 @@ class DAEProblem(DAEProblemMixin):
         self.Jp_eq_J = Jp is None
 
         self.u = u
-        self.u_init = u.copy(deepcopy=True)
         self.udot = udot
         self.tspan = tspan
         self.F = F
         self.Jp = Jp
         self.M = M
-        self.m = m
         if not isinstance(self.u, function.Function):
             raise TypeError(
                 "Provided solution is a '%s', not a Function" % type(self.u).__name__
@@ -127,17 +125,13 @@ class DAEProblem(DAEProblemMixin):
 
         # current value of time that may be used in weak form
         self.time = time or Constant(0.0)
-        # timeshift value provided by the solver
-        self.shift = Constant(1.0)
 
-        # Use the user-provided Jacobian. If none is provided, derive
-        # the Jacobian from the residual.
-        self.J = J or self.shift * ufl_expr.derivative(F, udot) + ufl_expr.derivative(
-            F, u
-        )
+        # Use the user-provided Jacobian. If none is provided, _TSContext will derive the
+        # proper jacobian for PETSc TS using the residual
+        self.J = J
 
         # Argument checking
-        check_forms(self.F, self.J, self.Jp, self.M, self.m)
+        check_forms(self.F, self.J, self.Jp, self.M)
 
         # Store form compiler parameters
         self.form_compiler_parameters = form_compiler_parameters
@@ -362,19 +356,19 @@ class DAESolver(OptionsManager, DAESolverMixin):
         ctx.set_ijacobian(self.ts)
         ctx.set_nullspace(
             nullspace,
-            problem.J.arguments()[0].function_space()._ises,
+            ctx.J.arguments()[0].function_space()._ises,
             transpose=False,
             near=False,
         )
         ctx.set_nullspace(
             nullspace_T,
-            problem.J.arguments()[1].function_space()._ises,
+            ctx.J.arguments()[1].function_space()._ises,
             transpose=True,
             near=False,
         )
         ctx.set_nullspace(
             near_nullspace,
-            problem.J.arguments()[0].function_space()._ises,
+            ctx.J.arguments()[0].function_space()._ises,
             transpose=False,
             near=True,
         )
@@ -422,8 +416,6 @@ class DAESolver(OptionsManager, DAESolverMixin):
 
         self._ctx.create_assemble_residual()
 
-        # Make sure appcontext is attached to the DM before we solve.
-        dm = self.ts.getDM()
         for dbc in self._problem.dirichlet_bcs():
             dbc.apply(self._problem.u)
 
@@ -432,6 +424,8 @@ class DAESolver(OptionsManager, DAESolverMixin):
             with lower.dat.vec_ro as lb, upper.dat.vec_ro as ub:
                 self.snes.setVariableBounds(lb, ub)
 
+        # Make sure appcontext is attached to the DM before we solve.
+        dm = self.ts.getDM()
         work = self._work
         with self._problem.u.dat.vec as u:
             u.copy(work)

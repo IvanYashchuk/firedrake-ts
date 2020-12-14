@@ -20,6 +20,8 @@ from firedrake.utils import cached_property
 
 from pyadjoint import no_annotations
 
+print = lambda x: PETSc.Sys.Print(x)
+
 
 def _make_reasons(reasons):
     return dict(
@@ -97,6 +99,7 @@ class _TSContext(object):
         transfer_manager=None,
     ):
         from firedrake.bcs import DirichletBC
+        from firedrake import ufl_expr
 
         if pmat_type is None:
             pmat_type = mat_type
@@ -114,6 +117,17 @@ class _TSContext(object):
         self._post_function_callback = post_function_callback
 
         self.fcp = problem.form_compiler_parameters
+
+        # timeshift value provided by the solver
+        self.shift = Constant(1.0)
+
+        F = self._problem.F
+        udot = self._problem.udot
+        u = self._problem.u
+
+        self.J = self._problem.J or self.shift * ufl_expr.derivative(
+            F, udot
+        ) + ufl_expr.derivative(F, u)
 
         if appctx is None:
             appctx = {}
@@ -136,7 +150,7 @@ class _TSContext(object):
             # Need separate pmat if either Jp is different or we want
             # a different pmat type to the mat type.
             if problem.Jp is None:
-                self.Jp = self._problem.J
+                self.Jp = self.J
             else:
                 self.Jp = problem.Jp
         else:
@@ -342,7 +356,7 @@ class _TSContext(object):
         splitter = ExtractSubBlock()
         for field in fields:
             F = splitter.split(problem.F, argument_indices=(field,))
-            J = splitter.split(problem.J, argument_indices=(field, field))
+            J = splitter.split(self.J, argument_indices=(field, field))
             us = problem.u.split()
             V = F.arguments()[0].function_space()
             # Exposition:
@@ -453,8 +467,14 @@ class _TSContext(object):
         if ctx._pre_function_callback is not None:
             ctx._pre_function_callback(X, Xdot)
 
-        ctx._assemble_residual()
         from firedrake import assemble
+
+        assemble(
+            ctx._problem.F,
+            tensor=ctx._F,
+            bcs=ctx.bcs_F,
+            form_compiler_parameters=ctx.fcp,
+        )
 
         if ctx._post_function_callback is not None:
             with ctx._F.dat.vec as F_:
@@ -476,6 +496,8 @@ class _TSContext(object):
         :arg J: the Jacobian (a Mat)
         :arg P: the preconditioner matrix (a Mat)
         """
+        from firedrake import assemble
+
         dm = ts.getDM()
         ctx = dmhooks.get_appctx(dm)
         problem = ctx._problem
@@ -499,9 +521,25 @@ class _TSContext(object):
         if ctx._pre_jacobian_callback is not None:
             ctx._pre_jacobian_callback(X, Xdot)
 
-        ctx._problem.shift.assign(shift)
-        ctx._assemble_jac()
-        from firedrake import assemble
+        ctx.shift.assign(shift)
+
+        from firedrake import ufl_expr
+
+        F = ctx._problem.F
+        udot = ctx._problem.udot
+        u = ctx._problem.u
+
+        # Update jacobian
+        ctx.J = ctx._problem.J or ctx.shift * ufl_expr.derivative(
+            F, udot
+        ) + ufl_expr.derivative(F, u)
+        assemble(
+            ctx.J,
+            tensor=ctx._jac,
+            bcs=ctx.bcs_J,
+            form_compiler_parameters=ctx.fcp,
+            mat_type=ctx.mat_type,
+        )
 
         if ctx._post_jacobian_callback is not None:
             ctx._post_jacobian_callback(X, Xdot, J)
@@ -510,7 +548,7 @@ class _TSContext(object):
             assert P.handle == ctx._pjac.petscmat.handle
             ctx._assemble_pjac()
 
-        ises = problem.J.arguments()[0].function_space()._ises
+        ises = ctx.J.arguments()[0].function_space()._ises
         ctx.set_nullspace(ctx._nullspace, ises, transpose=False, near=False)
         ctx.set_nullspace(ctx._nullspace_T, ises, transpose=True, near=False)
         ctx.set_nullspace(ctx._near_nullspace, ises, transpose=False, near=True)
@@ -720,9 +758,10 @@ class _TSContext(object):
     @cached_property
     def _jac(self):
         from firedrake.assemble import allocate_matrix
+        from firedrake import ufl_expr
 
         return allocate_matrix(
-            self._problem.J,
+            self.J,
             bcs=self.bcs_J,
             form_compiler_parameters=self.fcp,
             mat_type=self.mat_type,
@@ -735,7 +774,7 @@ class _TSContext(object):
         from firedrake.assemble import create_assembly_callable
 
         return create_assembly_callable(
-            self._problem.J,
+            self.J,
             tensor=self._jac,
             bcs=self.bcs_J,
             form_compiler_parameters=self.fcp,

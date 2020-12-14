@@ -23,12 +23,55 @@ def solver_parameters():
 
 
 @pytest.mark.skip()
+def test_shape_derivative(solver_parameters):
+
+    n = 10
+    mesh = UnitSquareMesh(n, n)
+
+    S = mesh.coordinates.function_space()
+    s = Function(S)
+    mesh.coordinates.assign(mesh.coordinates + s)
+
+    V = FunctionSpace(mesh, "CG", 1)
+    RHO = FunctionSpace(mesh, "DG", 0)
+    x = SpatialCoordinate(mesh)
+
+    u = Function(V)
+    u_t = Function(V)
+    v = TestFunction(V)
+
+    F = (inner(u_t, v) + u * u.dx(0) * v + a * u.dx(0) * v.dx(0)) * dx
+
+    bc = DirichletBC(V, 0.0, "on_boundary")
+
+    ic = interpolate(sin(2 * pi * x[0]), V)
+    u.interpolate(ic)
+
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc)
+    solver_parameters["ts_type"] = "beuler"
+    solver_parameters.pop("ts_theta_theta")
+    solver_parameters.pop("ts_theta_endpoint")
+    solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
+
+    u = solver.solve(u)
+
+    m = assemble(inner(u, u) * dx)
+    print(f"m: {m}")
+    c = Control(ic)
+    Jhat = ReducedFunctional(m, c)
+    m2 = Jhat(ic)
+    assert np.allclose(m, m2, 1e-6)
+
+    h = Function(V).interpolate(Constant(1.0))
+    assert taylor_test(Jhat, ic, h) > 1.9
+
+
 @pytest.mark.parametrize("control", ["constant", "function"])
 def test_burgers(control, solver_parameters):
 
-    n = 30
-    mesh = UnitSquareMesh(n, n)
-    V = VectorFunctionSpace(mesh, "CG", 2)
+    n = 10
+    mesh = UnitIntervalMesh(n)
+    V = FunctionSpace(mesh, "CG", 1)
     RHO = FunctionSpace(mesh, "DG", 0)
     x = SpatialCoordinate(mesh)
 
@@ -36,33 +79,35 @@ def test_burgers(control, solver_parameters):
     u_t = Function(V)
     v = TestFunction(V)
     if control == "constant":
-        a = Constant(5.0)
+        a = Constant(0.5)
     elif control == "function":
-        a = Function(RHO).interpolate(sin(x[0]))
+        a = Function(RHO).interpolate(Constant(0.5))
     else:
-        a = Function(RHO).interpolate(sin(x[0]))
-    F = (
-        inner(u_t, v) + inner(dot(u, nabla_grad(u)), v) + a * inner(grad(u), grad(v))
-    ) * dx
+        a = Function(RHO).interpolate(Constant(0.5))
+    F = (inner(u_t, v) + u * u.dx(0) * v + a * u.dx(0) * v.dx(0)) * dx
 
     bc = DirichletBC(V, 0.0, "on_boundary")
 
-    ic = project(as_vector([sin(pi * x[0]), 0]), V)
+    ic = interpolate(sin(2 * pi * x[0]), V)
     u.interpolate(ic)
-    M = inner(u, u) * dx
 
-    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc, M=M)
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc)
+    solver_parameters["ts_type"] = "beuler"
+    solver_parameters.pop("ts_theta_theta")
+    solver_parameters.pop("ts_theta_endpoint")
     solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
-    u, m = solver.solve(u)
+    u = solver.solve(u)
 
-    c = Control(a)
+    m = assemble(inner(u, u) * dx)
+    print(f"m: {m}")
+    c = Control(ic)
     Jhat = ReducedFunctional(m, c)
-    m2 = Jhat(a)
-    assert np.allclose(m, m2, 1e-8)
+    m2 = Jhat(ic)
+    assert np.allclose(m, m2, 1e-6)
 
-    h = Function(RHO).interpolate(Constant(1.0))
-    assert taylor_test(Jhat, a, h) > 1.9
+    h = Function(V).interpolate(Constant(1.0))
+    assert taylor_test(Jhat, ic, h) > 1.9
 
 
 @pytest.mark.parametrize("control", ["constant", "function"])
@@ -326,6 +371,15 @@ def test_combined_cost_function_adjoint(solver_parameters):
 
 
 if __name__ == "__main__":
+    params = {
+        "mat_type": "aij",
+        "ksp_type": "preonly",
+        "pc_type": "lu",
+        "ts_type": "theta",
+        "ts_dt": 0.1,
+        "ts_theta_theta": 0.5,
+        "ts_theta_endpoint": None,
+    }
     # test_integral_cost_function_adjoint("function")
     # test_integral_control_in_cost_function_adjoint("function")
     # test_integral_cost_function_recompute("function")
@@ -335,5 +389,5 @@ if __name__ == "__main__":
     # test_terminal_cost_function_adjoint()
     # test_combined_cost_function_adjoint()
     # test_initial_condition_recompute()
-    test_initial_condition_adjoint()
-    # test_burgers("function")
+    # test_initial_condition_adjoint(params)
+    test_burgers("function", params)

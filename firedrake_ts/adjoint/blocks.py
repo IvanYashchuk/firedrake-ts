@@ -11,7 +11,18 @@ import firedrake_ts
 
 class DAESolverBlock(GenericSolveBlock):
     def __init__(
-        self, F, u, udot, tspan, bcs, M, u0, solver_params, solver_kwargs, **kwargs
+        self,
+        F,
+        u,
+        udot,
+        tspan,
+        bcs,
+        M,
+        u0,
+        problem_J,
+        solver_params,
+        solver_kwargs,
+        **kwargs
     ):
         self.solver_params = solver_params.copy()
         self.solver_kwargs = solver_kwargs
@@ -20,6 +31,7 @@ class DAESolverBlock(GenericSolveBlock):
 
         self.udot = udot
         self.M = M
+        self.problem_J = problem_J
 
         if self.M is not None:
             for coeff in self.M.coefficients():
@@ -31,6 +43,10 @@ class DAESolverBlock(GenericSolveBlock):
         # gradient
         self.u0 = u0
 
+        if self.problem_J:
+            for coeff in self.problem_J.coefficients():
+                self.add_dependency(coeff, no_duplicates=True)
+
     def _init_solver_parameters(self, args, kwargs):
         super()._init_solver_parameters(args, kwargs)
         solve_init_params(self, args, kwargs, varform=True)
@@ -41,7 +57,7 @@ class DAESolverBlock(GenericSolveBlock):
 
     @no_annotations
     def evaluate_hessian():
-        raise NotImplementedError("TLM sensitivities are not implemented")
+        raise NotImplementedError("Hessians are not implemented")
 
     @no_annotations
     def evaluate_adj(self, markings):
@@ -73,10 +89,12 @@ class DAESolverBlock(GenericSolveBlock):
         func = self.backend.Function(problem.u.function_space())
         velfunc = self.backend.Function(problem.u.function_space())
         assign_map_F = self._ad_create_assign_map(problem.F, func, velfunc)
-        # assign_map_J = self._ad_create_assign_map(problem.J)
+        if problem.J:
+            assign_map_J = self._ad_create_assign_map(problem.J)
 
         problem.F = ufl.replace(problem.F, assign_map_F)
-        # problem.J = ufl.replace(problem.J, assign_map_J)
+        if problem.J:
+            problem.J = ufl.replace(problem.J, assign_map_J)
 
         # TODO is there a better way to avoid checking for this property everywhere?
         if hasattr(problem, "M") and problem.M:
@@ -94,10 +112,12 @@ class DAESolverBlock(GenericSolveBlock):
         self._ad_tsvs.adjoint_solve(adj_input=input)
 
         revs_assign_map_F = {v: k for k, v in assign_map_F.items()}
-        # revs_assign_map_J = {v: k for k, v in assign_map_J.items()}
+        if problem.J:
+            revs_assign_map_J = {v: k for k, v in assign_map_J.items()}
 
         problem.F = ufl.replace(problem.F, revs_assign_map_F)
-        # problem.J = ufl.replace(problem.J, revs_assign_map_J)
+        if problem.J:
+            problem.J = ufl.replace(problem.J, revs_assign_map_J)
 
         # TODO is there a better way to avoid checking for this property everywhere?
         if hasattr(problem, "M") and problem.M:
@@ -215,4 +235,6 @@ class DAESolverBlock(GenericSolveBlock):
         # TODO is there a better way to avoid checking for this property everywhere?
         if hasattr(problem, "M") and problem.M:
             self._ad_assign_coefficients(problem.M, func, velfunc)
-        # self._ad_assign_coefficients(problem.J)
+
+        if problem.J:
+            self._ad_assign_coefficients(problem.J, func, velfunc)
