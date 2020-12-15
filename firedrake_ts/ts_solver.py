@@ -303,7 +303,7 @@ class DAESolver(OptionsManager, DAESolverMixin):
         self._setup = False
 
     # TODO change the name to refer to just the cost function jacobians
-    def set_adjoint_jacobians(self, ctx, zero=False):
+    def set_cost_jacobians(self, ctx, zero=False):
         # Cache vectors for assembly of partial derivatives
         # TODO, the responsability for creating these vectors should be left for the context...
         # Same loop than in _Mjac_p and form_cost_jacobianP. It should all be the same

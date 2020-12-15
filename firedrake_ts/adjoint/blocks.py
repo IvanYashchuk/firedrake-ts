@@ -89,22 +89,21 @@ class DAESolverBlock(GenericSolveBlock):
         func = self.backend.Function(problem.u.function_space())
         velfunc = self.backend.Function(problem.u.function_space())
         assign_map_F = self._ad_create_assign_map(problem.F, func, velfunc)
-        if problem.J:
-            assign_map_J = self._ad_create_assign_map(problem.J)
-
         problem.F = ufl.replace(problem.F, assign_map_F)
         if problem.J:
+            assign_map_J = self._ad_create_assign_map(problem.J)
             problem.J = ufl.replace(problem.J, assign_map_J)
 
-        # TODO is there a better way to avoid checking for this property everywhere?
         if hasattr(problem, "M") and problem.M:
             assign_map_M = self._ad_create_assign_map(problem.M, func, velfunc)
             problem.M = ufl.replace(problem.M, assign_map_M)
 
         if problem.M and isinstance(input, float):
-            self._ad_tsvs.set_adjoint_jacobians(self._ad_tsvs._ctx)
-        elif isinstance(input, vector.Vector) and problem.M:
-            self._ad_tsvs.set_adjoint_jacobians(self._ad_tsvs._ctx, zero=True)
+            self._ad_tsvs.set_cost_jacobians(self._ad_tsvs._ctx)
+        elif (
+            isinstance(input, vector.Vector) and problem.M
+        ):  # The output from DAESolver.solve() is just the solution, we just zero them because the quadrature TS can be actually set.
+            self._ad_tsvs.set_cost_jacobians(self._ad_tsvs._ctx, zero=True)
 
         problem.u = assign_map_F[problem.u]
         problem.udot = assign_map_F[problem.udot]
@@ -112,14 +111,11 @@ class DAESolverBlock(GenericSolveBlock):
         self._ad_tsvs.adjoint_solve(adj_input=input)
 
         revs_assign_map_F = {v: k for k, v in assign_map_F.items()}
-        if problem.J:
-            revs_assign_map_J = {v: k for k, v in assign_map_J.items()}
-
         problem.F = ufl.replace(problem.F, revs_assign_map_F)
         if problem.J:
+            revs_assign_map_J = {v: k for k, v in assign_map_J.items()}
             problem.J = ufl.replace(problem.J, revs_assign_map_J)
 
-        # TODO is there a better way to avoid checking for this property everywhere?
         if hasattr(problem, "M") and problem.M:
             revs_assign_map_M = {v: k for k, v in assign_map_M.items()}
             problem.M = ufl.replace(problem.M, revs_assign_map_M)

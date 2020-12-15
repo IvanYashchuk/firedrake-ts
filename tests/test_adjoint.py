@@ -1,3 +1,4 @@
+from pyadjoint.tape import no_annotations
 import pytest
 from firedrake import *
 from firedrake_adjoint import *
@@ -64,6 +65,63 @@ def test_shape_derivative(solver_parameters):
 
     h = Function(V).interpolate(Constant(1.0))
     assert taylor_test(Jhat, ic, h) > 1.9
+
+
+@pytest.mark.parametrize("control", ["constant", "function"])
+def test_time_dependent_bcs(control, solver_parameters):
+
+    n = 10
+    mesh = UnitIntervalMesh(n)
+    V = FunctionSpace(mesh, "CG", 1)
+    RHO = FunctionSpace(mesh, "DG", 0)
+    x = SpatialCoordinate(mesh)
+
+    u = Function(V)
+    u_t = Function(V)
+    v = TestFunction(V)
+    if control == "constant":
+        a = Constant(0.5)
+    elif control == "function":
+        a = Function(RHO).interpolate(Constant(0.5))
+    else:
+        a = Function(RHO).interpolate(Constant(0.5))
+    F = inner(u_t, v) * dx + inner(grad(u), grad(v)) * dx - a * v * dx
+
+    rate = 0.1
+    time = Constant(0.0)
+    vd = Function(V).interpolate(time * rate)
+    bc = DirichletBC(V, vd, "on_boundary")
+
+    @no_annotations
+    def apply_time_bcs(X, Xdot, time):
+        vd.interpolate(Constant(time * rate))
+
+    ic = interpolate(sin(2 * pi * x[0]), V)
+    u.interpolate(ic)
+
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc)
+    solver_parameters["ts_type"] = "beuler"
+    solver_parameters["snes_monitor"] = None
+    solver_parameters["snes_monitor_solution"] = None
+    solver_parameters.pop("ts_theta_theta")
+    solver_parameters.pop("ts_theta_endpoint")
+    solver = firedrake_ts.DAESolver(
+        problem,
+        solver_parameters=solver_parameters,
+        pre_function_callback=apply_time_bcs,
+    )
+
+    u = solver.solve(u)
+
+    m = assemble(inner(u, u) * dx)
+    print(f"m: {m}")
+    c = Control(ic)
+    Jhat = ReducedFunctional(m, c)
+    m2 = Jhat(ic)
+    assert np.allclose(m, m2, 1e-6)
+
+    # h = Function(V).interpolate(Constant(1.0))
+    # assert taylor_test(Jhat, ic, h) > 1.9
 
 
 @pytest.mark.parametrize("control", ["constant", "function"])
@@ -380,14 +438,15 @@ if __name__ == "__main__":
         "ts_theta_theta": 0.5,
         "ts_theta_endpoint": None,
     }
-    # test_integral_cost_function_adjoint("function")
-    # test_integral_control_in_cost_function_adjoint("function")
-    # test_integral_cost_function_recompute("function")
-    # test_integral_cost_function_adjoint("constant")
-    # test_integral_control_in_cost_function_adjoint("constant")
-    # test_integral_cost_function_recompute("constant")
-    # test_terminal_cost_function_adjoint()
-    # test_combined_cost_function_adjoint()
-    # test_initial_condition_recompute()
+    # test_integral_cost_function_adjoint("function", params)
+    # test_integral_control_in_cost_function_adjoint("function", params)
+    # test_integral_cost_function_recompute("function", params)
+    # test_integral_cost_function_adjoint("constant", params)
+    # test_integral_control_in_cost_function_adjoint("constant", params)
+    # test_integral_cost_function_recompute("constant", params)
+    # test_terminal_cost_function_adjoint(params)
+    # test_combined_cost_function_adjoint(params)
+    # test_initial_condition_recompute(params)
     # test_initial_condition_adjoint(params)
-    test_burgers("function", params)
+    # test_burgers("function", params)
+    test_time_dependent_bcs("function", params)

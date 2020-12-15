@@ -465,7 +465,7 @@ class _TSContext(object):
         ctx._problem.time.assign(t)
 
         if ctx._pre_function_callback is not None:
-            ctx._pre_function_callback(X, Xdot)
+            ctx._pre_function_callback(X, Xdot, t)
 
         from firedrake import assemble
 
@@ -519,7 +519,7 @@ class _TSContext(object):
         ctx._problem.time.assign(t)
 
         if ctx._pre_jacobian_callback is not None:
-            ctx._pre_jacobian_callback(X, Xdot)
+            ctx._pre_jacobian_callback(X, Xdot, t)
 
         ctx.shift.assign(shift)
 
