@@ -1,4 +1,4 @@
-from pyadjoint.tape import no_annotations
+from pyadjoint.tape import no_annotations, stop_annotating
 import pytest
 from firedrake import *
 from firedrake_adjoint import *
@@ -81,34 +81,41 @@ def test_time_dependent_bcs(control, solver_parameters):
     v = TestFunction(V)
     if control == "constant":
         a = Constant(0.5)
-    elif control == "function":
-        a = Function(RHO).interpolate(Constant(0.5))
     else:
-        a = Function(RHO).interpolate(Constant(0.5))
+        a = Function(RHO)
+        with stop_annotating():
+            a.interpolate(Constant(0.5))
     F = inner(u_t, v) * dx + inner(grad(u), grad(v)) * dx - a * v * dx
 
     rate = 0.1
-    time = Constant(0.0)
-    vd = Function(V).interpolate(time * rate)
+    vd = Function(V)
+    with stop_annotating():
+        vd.interpolate(Constant(0.0))
     bc = DirichletBC(V, vd, "on_boundary")
 
+    u_bc = Function(V)
+
     @no_annotations
-    def apply_time_bcs(X, Xdot, time):
-        vd.interpolate(Constant(time * rate))
+    def apply_time_bcs(ts, steps, time, X):
+        with u_bc.dat.vec as u_vec:
+            X.copy(u_vec)
+        bc.function_arg.assign(time * rate)
+        bc.apply(u_bc)
+        with u_bc.dat.vec as u_vec:
+            u_vec.copy(X)
 
     ic = interpolate(sin(2 * pi * x[0]), V)
-    u.interpolate(ic)
+    u.assign(ic)
 
     problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc)
     solver_parameters["ts_type"] = "beuler"
     solver_parameters["snes_monitor"] = None
-    solver_parameters["snes_monitor_solution"] = None
     solver_parameters.pop("ts_theta_theta")
     solver_parameters.pop("ts_theta_endpoint")
     solver = firedrake_ts.DAESolver(
         problem,
         solver_parameters=solver_parameters,
-        pre_function_callback=apply_time_bcs,
+        monitor_callback=apply_time_bcs,
     )
 
     u = solver.solve(u)
@@ -120,8 +127,8 @@ def test_time_dependent_bcs(control, solver_parameters):
     m2 = Jhat(ic)
     assert np.allclose(m, m2, 1e-6)
 
-    # h = Function(V).interpolate(Constant(1.0))
-    # assert taylor_test(Jhat, ic, h) > 1.9
+    h = Function(V).interpolate(Constant(1.0))
+    assert taylor_test(Jhat, ic, h) > 1.9
 
 
 @pytest.mark.parametrize("control", ["constant", "function"])

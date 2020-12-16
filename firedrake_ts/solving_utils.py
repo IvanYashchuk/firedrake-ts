@@ -469,16 +469,11 @@ class _TSContext(object):
 
         from firedrake import assemble
 
-        assemble(
-            ctx._problem.F,
-            tensor=ctx._F,
-            bcs=ctx.bcs_F,
-            form_compiler_parameters=ctx.fcp,
-        )
+        ctx._assemble_residual()
 
         if ctx._post_function_callback is not None:
             with ctx._F.dat.vec as F_:
-                ctx._post_function_callback(X, Xdot, F_)
+                ctx._post_function_callback(X, Xdot, F_, t)
 
         # F may not be the same vector as self._F, so copy
         # residual out to F.
