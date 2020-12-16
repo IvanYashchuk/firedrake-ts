@@ -1,9 +1,9 @@
-from pyadjoint.tape import no_annotations, stop_annotating
 import pytest
 from firedrake import *
 from firedrake_adjoint import *
 import petsc4py
 import firedrake_ts
+from pyadjoint.tape import no_annotations, stop_annotating
 import numpy as np
 
 petsc4py.PETSc.Sys.popErrorHandler()
