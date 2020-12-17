@@ -378,7 +378,7 @@ def test_terminal_cost_function_multiple_deps_in_form_adjoint(solver_parameters)
         a.interpolate(Constant(5.0))
         f.interpolate(Constant(0.5))
         rho.interpolate(Constant(0.2))
-    F = inner(a * u_t, v) * dx + inner(rho * grad(u), grad(v)) * dx - f * v * dx
+    F = inner(rho * u_t, v) * dx + inner(grad(u), grad(v)) * dx - f * v * dx
 
     bc = DirichletBC(V, 0.0, "on_boundary")
 
