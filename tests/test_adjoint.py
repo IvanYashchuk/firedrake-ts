@@ -361,6 +361,48 @@ def test_integral_control_in_cost_function_adjoint(control, solver_parameters):
     assert taylor_test(Jhat, f, h) > 1.9
 
 
+@pytest.mark.skip()
+def test_terminal_cost_function_multiple_deps_in_form_adjoint(solver_parameters):
+
+    mesh = UnitIntervalMesh(10)
+    V = FunctionSpace(mesh, "P", 1)
+
+    u = Function(V)
+    u_t = Function(V)
+    v = TestFunction(V)
+    # a = Constant(2.0)
+    a = Function(V)
+    f = Function(V)
+    rho = Function(V)
+    with stop_annotating():
+        a.interpolate(Constant(5.0))
+        f.interpolate(Constant(0.5))
+        rho.interpolate(Constant(0.2))
+    F = inner(a * u_t, v) * dx + inner(rho * grad(u), grad(v)) * dx - f * v * dx
+
+    bc = DirichletBC(V, 0.0, "on_boundary")
+
+    x = SpatialCoordinate(mesh)
+    bump = conditional(lt(abs(x[0] - 0.5), 0.1), 1.0, 0.0)
+    u.interpolate(bump)
+
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc)
+    solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
+
+    u = solver.solve(u)
+
+    J = assemble(u * u * dx)
+
+    c = Control(rho)
+    Jhat = ReducedFunctional(J, c)
+    print(f"m: {Jhat(rho)}")
+    djdf_adjoint = Jhat.derivative()
+    print(djdf_adjoint.dat.data)
+
+    h = Function(V).interpolate(Constant(1.0e0))
+    assert taylor_test(Jhat, rho, h) > 1.9
+
+
 def test_terminal_cost_function_adjoint(solver_parameters):
 
     mesh = UnitIntervalMesh(10)
@@ -456,4 +498,5 @@ if __name__ == "__main__":
     # test_initial_condition_recompute(params)
     # test_initial_condition_adjoint(params)
     # test_burgers("function", params)
-    test_time_dependent_bcs("function", params)
+    # test_time_dependent_bcs("function", params)
+    test_terminal_cost_function_multiple_deps_in_form_adjoint(params)

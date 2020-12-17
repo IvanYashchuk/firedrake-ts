@@ -179,6 +179,10 @@ class _TSContext(object):
         self._near_nullspace = None
         self._transfer_manager = transfer_manager
 
+        # Keep a map of the local indices in the stacked vector where each block variable
+        # is placed
+        self.bv_indices_map = {}
+
     def create_assemble_residual(self):
         from firedrake.assemble import create_assembly_callable
 
@@ -873,6 +877,10 @@ class _TSContext(object):
             else:
                 local_m_size += coeff.dat.data.size
                 m += coeff.function_space().dim()
+            self.bv_indices_map[coeff] = (
+                local_m_size - coeff.dat.data.size,
+                local_m_size,
+            )
         J = PETSc.Mat().createAIJ([[local_n_size, n], [local_m_size, m]])
         J.setType("python")
         shell = self.RHSJacPShell(self)

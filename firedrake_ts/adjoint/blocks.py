@@ -22,7 +22,7 @@ class DAESolverBlock(GenericSolveBlock):
         problem_J,
         solver_params,
         solver_kwargs,
-        **kwargs
+        **kwargs,
     ):
         self.solver_params = solver_params.copy()
         self.solver_kwargs = solver_kwargs
@@ -126,7 +126,7 @@ class DAESolverBlock(GenericSolveBlock):
         dJdu, dJdf = self._ad_tsvs.get_cost_gradients()
         dJdf_ownership = dJdf.getOwnershipRange()
 
-        local_shift = 0
+        bv_indices_map = self._ad_tsvs._ctx.bv_indices_map
         for idx, dep in relevant_dependencies:
             if dep.output == self.u0:
                 if isinstance(input, float):
@@ -152,14 +152,13 @@ class DAESolverBlock(GenericSolveBlock):
                     tmp = function.Function(c_rep.function_space())
 
                 with tmp.dat.vec as y_vec:
+                    local_indices = bv_indices_map[dep.output]
                     local_range = y_vec.getOwnershipRange()
-                    local_size = local_range[1] - local_range[0]
                     y_vec[local_range[0] : local_range[1]] = dJdf[
-                        (dJdf_ownership[0] + local_shift) : (
-                            dJdf_ownership[0] + local_shift + local_size
+                        (dJdf_ownership[0] + local_indices[0]) : (
+                            dJdf_ownership[0] + local_indices[1]
                         )
                     ]
-                local_shift += local_size
                 if tmp is not None:
                     # Whether the output is the solution or the integral
                     if isinstance(input, float):
