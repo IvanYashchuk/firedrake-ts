@@ -361,7 +361,6 @@ def test_integral_control_in_cost_function_adjoint(control, solver_parameters):
     assert taylor_test(Jhat, f, h) > 1.9
 
 
-@pytest.mark.skip()
 def test_terminal_cost_function_multiple_deps_in_form_adjoint(solver_parameters):
 
     mesh = UnitIntervalMesh(10)

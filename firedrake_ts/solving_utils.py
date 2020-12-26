@@ -254,8 +254,8 @@ class _TSContext(object):
         def multTranspose(self, A, x, y):
             "y <- A' * x"
             y_ownership = y.getOwnershipRange()
-            local_shift = 0
             block_outputs = [dep.output for dep in self.ctx.block.get_outputs()]
+            bv_indices_map = self.ctx.bv_indices_map
             for block_variable in self.ctx.block.get_dependencies():
                 coeff = block_variable.output
                 c_rep = block_variable.saved_output
@@ -279,16 +279,16 @@ class _TSContext(object):
                 else:
                     tmp = function.Function(c_rep.function_space())
                 dFdf = derivative(self.ctx._problem.F, c_rep)
+                local_indices = bv_indices_map[coeff]
                 with tmp.dat.vec as y_vec:
                     local_range = y_vec.getOwnershipRange()
-                    local_size = local_range[1] - local_range[0]
                     assemble(adjoint(dFdf)).petscmat.mult(x, y_vec)
                     y[
-                        (y_ownership[0] + local_shift) : (
-                            y_ownership[0] + local_shift + local_size
+                        (y_ownership[0] + local_indices[0]) : (
+                            y_ownership[0] + local_indices[1]
                         )
-                    ] = y_vec.array_r
-                local_shift += c_rep.dat.data.size
+                    ] = y_vec[local_range[0] : local_range[1]]
+
             y.assemble()
 
     def set_ifunction(self, ts):
@@ -328,8 +328,9 @@ class _TSContext(object):
         with self._dMdx.dat.vec as dMdx_vec:
             dMdx_vec.zeroEntries()
         if isinstance(adj_input, vector.Vector):
-            bcs = (homogenize(self.bcs_J),)
-            bcs[0][0].apply(adj_input)  # TODO what if Dirichlet is a control
+            if self.bcs_J:
+                bcs = (homogenize(self.bcs_J),)
+                bcs[0][0].apply(adj_input)  # TODO what if Dirichlet is a control
             with adj_input.dat.vec_ro as adj_vec, self._dMdx.dat.vec as dmdx_vec:
                 adj_vec.copy(dmdx_vec)
 
@@ -644,7 +645,7 @@ class _TSContext(object):
         ctx._problem.time.assign(t)
 
         if ctx.block.get_dependencies():
-            local_shift = 0
+            bv_indices_map = ctx.bv_indices_map
             for i, block_variable in enumerate(ctx.block.get_dependencies()):
                 c_rep = block_variable.saved_output
                 coeff = block_variable.output
@@ -672,16 +673,16 @@ class _TSContext(object):
                 )
 
                 J_ownership = J.getOwnershipRange()
+                local_indices = bv_indices_map[coeff]
                 with ctx._Mjac_p_vecs[coeff].dat.vec_ro as v:
                     local_range = v.getOwnershipRange()
                     local_size = local_range[1] - local_range[0]
                     J[
-                        (J_ownership[0] + local_shift) : (
-                            J_ownership[0] + local_shift + local_size
+                        (J_ownership[0] + local_indices[0]) : (
+                            J_ownership[0] + local_indices[1]
                         ),
                         0,
-                    ] = v.array_r
-                    local_shift += local_size
+                    ] = v[local_range[0] : local_range[1]]
             J.assemble()
 
     @staticmethod
@@ -715,6 +716,8 @@ class _TSContext(object):
         ctx._problem.time.assign(t)
         with ctx._problem.u.dat.vec_wo as v:
             X.copy(v)
+        with ctx._problem.udot.dat.vec_wo as v:
+            Xdot.copy(v)
 
     @staticmethod
     def compute_operators(ksp, J, P):
