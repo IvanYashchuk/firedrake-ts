@@ -476,6 +476,49 @@ def test_combined_cost_function_adjoint(solver_parameters):
     assert taylor_test(Ghat, f, h) > 1.9
 
 
+def test_multiple_coeffs(solver_parameters):
+
+    mesh = UnitIntervalMesh(10)
+    V = FunctionSpace(mesh, "P", 1)
+
+    u = Function(V)
+    u_t = Function(V)
+    v = TestFunction(V)
+    f = Function(V).interpolate(Constant(5.0))
+    a = Constant(2.0)
+    b = Constant(2.0)
+    F = inner(u_t, v) * dx + inner(b * grad(u), grad(v)) * dx - f * v * dx
+
+    bc = DirichletBC(V, 0.0, "on_boundary")
+
+    x = SpatialCoordinate(mesh)
+    bump = conditional(lt(abs(x[0] - 0.5), 0.1), 1.0, 0.0)
+    u.interpolate(bump)
+
+    M = u * u * f * b * dx
+    problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc, M=M)
+    solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
+
+    u, m = solver.solve(u)
+
+    c = Control(f)
+
+    J = assemble(u * u * dx)
+    Jhat = ReducedFunctional(J, c)
+    Jhat(f)
+    djdf_adjoint = Jhat.derivative()
+
+    h = Function(V).interpolate(Constant(1.0e1))
+    assert taylor_test(Jhat, f, h) > 1.9
+
+    Ghat = ReducedFunctional(m, c)
+    Ghat(f)
+    dgdf_adjoint = Ghat.derivative()
+
+    h = Function(V).interpolate(Constant(1.0e1))
+    assert taylor_test(Ghat, f, h) > 1.9
+
+
 if __name__ == "__main__":
     params = {
         "mat_type": "aij",
@@ -486,16 +529,17 @@ if __name__ == "__main__":
         "ts_theta_theta": 0.5,
         "ts_theta_endpoint": None,
     }
-    test_integral_cost_function_adjoint("function", params)
-    test_integral_control_in_cost_function_adjoint("function", params)
-    test_integral_cost_function_recompute("function", params)
-    test_integral_cost_function_adjoint("constant", params)
-    test_integral_control_in_cost_function_adjoint("constant", params)
-    test_integral_cost_function_recompute("constant", params)
-    test_terminal_cost_function_adjoint(params)
-    test_combined_cost_function_adjoint(params)
-    test_initial_condition_recompute(params)
-    test_initial_condition_adjoint(params)
-    test_burgers("function", params)
-    test_time_dependent_bcs("function", params)
-    test_terminal_cost_function_multiple_deps_in_form_adjoint(params)
+    # test_integral_cost_function_adjoint("function", params)
+    # test_integral_control_in_cost_function_adjoint("function", params)
+    # test_integral_cost_function_recompute("function", params)
+    # test_integral_cost_function_adjoint("constant", params)
+    # test_integral_control_in_cost_function_adjoint("constant", params)
+    # test_integral_cost_function_recompute("constant", params)
+    # test_terminal_cost_function_adjoint(params)
+    # test_combined_cost_function_adjoint(params)
+    # test_initial_condition_recompute(params)
+    # test_initial_condition_adjoint(params)
+    # test_burgers("function", params)
+    # test_time_dependent_bcs("function", params)
+    # test_terminal_cost_function_multiple_deps_in_form_adjoint(params)
+    test_multiple_coeffs(params)

@@ -276,18 +276,28 @@ class _TSContext(object):
                 elif isinstance(c_rep, Constant):
                     mesh = self.ctx._problem.F.ufl_domain()
                     tmp = function.Function(c_rep._ad_function_space(mesh))
-                else:
-                    tmp = function.Function(c_rep.function_space())
-                dFdf = derivative(self.ctx._problem.F, c_rep)
-                local_indices = bv_indices_map[coeff]
-                with tmp.dat.vec as y_vec:
-                    local_range = y_vec.getOwnershipRange()
-                    assemble(adjoint(dFdf)).petscmat.mult(x, y_vec)
+                    dFdf = derivative(self.ctx._problem.F, c_rep)
+                    local_indices = bv_indices_map[coeff]
+                    with tmp.dat.vec as y_vec:
+                        local_range = y_vec.getOwnershipRange()
+                        assemble(adjoint(dFdf)).petscmat.mult(x, y_vec)
                     y[
                         (y_ownership[0] + local_indices[0]) : (
                             y_ownership[0] + local_indices[1]
                         )
-                    ] = y_vec[local_range[0] : local_range[1]]
+                    ] = tmp.dat.data
+                else:
+                    tmp = function.Function(c_rep.function_space())
+                    dFdf = derivative(self.ctx._problem.F, c_rep)
+                    local_indices = bv_indices_map[coeff]
+                    with tmp.dat.vec as y_vec:
+                        local_range = y_vec.getOwnershipRange()
+                        assemble(adjoint(dFdf)).petscmat.mult(x, y_vec)
+                        y[
+                            (y_ownership[0] + local_indices[0]) : (
+                                y_ownership[0] + local_indices[1]
+                            )
+                        ] = y_vec[local_range[0] : (local_range[1])]
 
             y.assemble()
 
@@ -674,15 +684,22 @@ class _TSContext(object):
 
                 J_ownership = J.getOwnershipRange()
                 local_indices = bv_indices_map[coeff]
-                with ctx._Mjac_p_vecs[coeff].dat.vec_ro as v:
-                    local_range = v.getOwnershipRange()
-                    local_size = local_range[1] - local_range[0]
+                if isinstance(c_rep, function.Function):
+                    with ctx._Mjac_p_vecs[coeff].dat.vec_ro as v:
+                        local_range = v.getOwnershipRange()
+                        J[
+                            (J_ownership[0] + local_indices[0]) : (
+                                J_ownership[0] + local_indices[1]
+                            ),
+                            0,
+                        ] = v[local_range[0] : local_range[1]]
+                elif isinstance(c_rep, Constant):
                     J[
                         (J_ownership[0] + local_indices[0]) : (
                             J_ownership[0] + local_indices[1]
                         ),
                         0,
-                    ] = v[local_range[0] : local_range[1]]
+                    ] = ctx._Mjac_p_vecs[coeff].dat.data
             J.assemble()
 
     @staticmethod
