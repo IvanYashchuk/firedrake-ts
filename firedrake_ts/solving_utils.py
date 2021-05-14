@@ -7,7 +7,6 @@ import numpy
 
 import itertools
 from firedrake import homogenize, derivative, adjoint
-from numpy.core.shape_base import block
 from pyadjoint import block_variable
 
 from pyop2 import op2
