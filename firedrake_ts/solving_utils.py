@@ -170,14 +170,14 @@ class _TSContext(object):
         )
         if self.G is not None:
             from firedrake import LinearSolver
-            from firedrake import assemble
-            from firedrake.assemble import create_assembly_callable
 
-            self._assemble_rhs_residual = create_assembly_callable(
+            self._assemble_rhs_residual = functools.partial(
+                assemble,
                 self.G,
                 tensor=self._G,
                 bcs=self.bcs_G,
                 form_compiler_parameters=self.fcp,
+                assembly_type="residual",
             )
             mass_matrix = assemble(
                 ufl_expr.derivative(self.F, self._xdot), bcs=self.bcs_G
@@ -676,14 +676,14 @@ class _TSContext(object):
     @cached_property
     def _assemble_rhs_jac(self):
         if self.G is not None:
-            from firedrake.assemble import create_assembly_callable
-
-            return create_assembly_callable(
+            return functools.partial(
+                assemble,
                 self.dGdu,
                 tensor=self._rhs_jac,
                 bcs=self.bcs_dGdu,
                 form_compiler_parameters=self.fcp,
                 mat_type=self.mat_type,
+                assembly_type="residual",
             )
         else:
             return None
