@@ -1,8 +1,8 @@
 # This example is based on
 # https://github.com/rckirby/Irksome/blob/master/demos/bbm/demo_bbm.py.rst
 
-import firedrake_ts
 from firedrake import *
+import firedrake_ts
 
 
 def sech(x):
@@ -58,6 +58,7 @@ params = {
     "mat_type": "aij",
     "ksp_type": "preonly",
     "pc_type": "lu",
+    "pc_factor_mat_solver_type": "mumps",
     "ts_type": "theta",
     "ts_theta_theta": 0.5,  # implicit midpoint method | the Gauss–Legendre method of order two
     "ts_exact_final_time": "matchstep",
