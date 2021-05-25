@@ -24,7 +24,7 @@ F = (
     inner(u_t, v) + inner(dot(u, nabla_grad(u)), v) + nu * inner(grad(u), grad(v))
 ) * dx
 
-outfile = File("burgers.pvd")
+outfile = File("result/burgers.pvd")
 outfile.write(project(u, V_out, name="Velocity"), time=0.0)
 
 
