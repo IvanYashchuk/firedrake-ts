@@ -1,9 +1,10 @@
 import numpy
 
+import functools
 import itertools
 
 from pyop2 import op2
-from firedrake import function, dmhooks
+from firedrake import function, dmhooks, assemble
 from firedrake.exceptions import ConvergenceError
 from firedrake.petsc import PETSc
 from firedrake.formmanipulation import ExtractSubBlock
@@ -85,7 +86,6 @@ class _TSContext(object):
         options_prefix=None,
         transfer_manager=None,
     ):
-        from firedrake.assemble import create_assembly_callable
         from firedrake.bcs import DirichletBC
 
         if pmat_type is None:
@@ -152,8 +152,13 @@ class _TSContext(object):
         self.bcs_Jp = [
             bc if isinstance(bc, DirichletBC) else bc._Jp for bc in problem.bcs
         ]
-        self._assemble_residual = create_assembly_callable(
-            self.F, tensor=self._F, bcs=self.bcs_F, form_compiler_parameters=self.fcp
+        self._assemble_residual = functools.partial(
+            assemble,
+            self.F,
+            tensor=self._F,
+            bcs=self.bcs_F,
+            form_compiler_parameters=self.fcp,
+            assembly_type="residual",
         )
 
         self._jacobian_assembled = False
@@ -468,14 +473,14 @@ class _TSContext(object):
 
     @cached_property
     def _assemble_jac(self):
-        from firedrake.assemble import create_assembly_callable
-
-        return create_assembly_callable(
+        return functools.partial(
+            assemble,
             self.J,
             tensor=self._jac,
             bcs=self.bcs_J,
             form_compiler_parameters=self.fcp,
             mat_type=self.mat_type,
+            assembly_type="residual",
         )
 
     @cached_property
@@ -500,14 +505,14 @@ class _TSContext(object):
 
     @cached_property
     def _assemble_pjac(self):
-        from firedrake.assemble import create_assembly_callable
-
-        return create_assembly_callable(
+        return functools.partial(
+            assemble,
             self.Jp,
             tensor=self._pjac,
             bcs=self.bcs_Jp,
             form_compiler_parameters=self.fcp,
             mat_type=self.pmat_type,
+            assembly_type="residual",
         )
 
     @cached_property
