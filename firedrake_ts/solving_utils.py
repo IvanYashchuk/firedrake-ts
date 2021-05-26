@@ -8,13 +8,8 @@ from firedrake import function, dmhooks, assemble
 from firedrake.exceptions import ConvergenceError
 from firedrake.petsc import PETSc
 from firedrake.formmanipulation import ExtractSubBlock
+from firedrake.solving_utils import _make_reasons
 from firedrake.utils import cached_property
-
-
-def _make_reasons(reasons):
-    return dict(
-        [(getattr(reasons, r), r) for r in dir(reasons) if not r.startswith("_")]
-    )
 
 
 TSReasons = _make_reasons(PETSc.TS.ConvergedReason())
