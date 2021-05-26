@@ -58,6 +58,8 @@ class _TSContext(object):
     :arg post_function_callback: User-defined function called immediately
         after residual assembly
     :arg options_prefix: The options prefix of the TS.
+    :arg project_rhs: If True the right-hand-side term is projected using a mass matrix solver.
+    :arg rhs_projection_parameters: Solver parameters of the right-hand-side projection solver.
     :arg transfer_manager: Object that can transfer functions between
         levels, typically a :class:`~.TransferManager`
 
@@ -79,6 +81,8 @@ class _TSContext(object):
         post_jacobian_callback=None,
         post_function_callback=None,
         options_prefix=None,
+        project_rhs=True,
+        rhs_projection_parameters=None,
         transfer_manager=None,
     ):
         from firedrake.bcs import DirichletBC
@@ -163,9 +167,8 @@ class _TSContext(object):
             form_compiler_parameters=self.fcp,
             assembly_type="residual",
         )
-        if self.G is not None:
-            from firedrake import LinearSolver
 
+        if self.G is not None:
             self._assemble_rhs_residual = functools.partial(
                 assemble,
                 self.G,
@@ -174,16 +177,12 @@ class _TSContext(object):
                 form_compiler_parameters=self.fcp,
                 assembly_type="residual",
             )
-            mass_matrix = assemble(
-                ufl_expr.derivative(self.F, self._xdot), bcs=self.bcs_G
-            )
-            self._rhs_projection_solver = LinearSolver(mass_matrix)
-        else:
-            self._assemble_rhs_residual = None
-            self._rhs_projection_solver = None
+            self.rhs_projection_parameters = rhs_projection_parameters
+            self.project_rhs = project_rhs
+            self._G_or_projected_G = self._projected_G if self.project_rhs else self._G
+            self._rhs_jacobian_assembled = False
 
         self._jacobian_assembled = False
-        self._rhs_jacobian_assembled = False
         self._splits = {}
         self._coarse = None
         self._fine = None
@@ -252,7 +251,7 @@ class _TSContext(object):
     def set_rhs_function(self, ts):
         r"""Set the function to compute G(t,u) where F() = G() is the equation to be solved."""
         if self.G is not None:
-            with self._projected_G.dat.vec_wo as v:
+            with self._G_or_projected_G.dat.vec_wo as v:
                 ts.setRHSFunction(self.form_rhs_function, f=v)
 
     def set_rhs_jacobian(self, ts):
@@ -488,9 +487,9 @@ class _TSContext(object):
 
         # TODO: Add post_rhs_function_callback
 
-        # G may not be the same vector as self._G, so copy
+        # G may not be the same vector as self._projected_G, so copy
         # residual out to G.
-        with ctx._G.dat.vec_ro as v:
+        with ctx._G_or_projected_G.dat.vec_ro as v:
             v.copy(G)
 
     @staticmethod
@@ -509,7 +508,7 @@ class _TSContext(object):
 
         assert J.handle == ctx._rhs_jac.petscmat.handle
         # TODO: Check how to use constant jacobian properly for TS
-        if problem._constant_jacobian and ctx._rhs_jacobian_assembled:
+        if problem._constant_rhs_jacobian and ctx._rhs_jacobian_assembled:
             # Don't need to do any work with a constant jacobian
             # that's already assembled
             return
@@ -637,16 +636,36 @@ class _TSContext(object):
     def _projected_G(self):
         return function.Function(self.G.arguments()[0].function_space())
 
-    # @cached_property
-    def _assemble_projected_rhs_residual(self):
+    @cached_property
+    def _rhs_projection_solver(self):
         if self.G is not None:
-            # from firedrake import ufl_expr
-            # from firedrake import solve
-            # from firedrake import LinearSolver
+            from firedrake import LinearSolver
 
+            mass_matrix = assemble(
+                ufl_expr.derivative(self.F, self._xdot), bcs=self.bcs_G
+            )
+
+            prefix = self.options_prefix or ""
+            prefix += "rhs_projection_solver"
+
+            _rhs_projection_solver = LinearSolver(
+                mass_matrix,
+                solver_parameters=self.rhs_projection_parameters,
+                options_prefix=prefix,
+            )
+            return _rhs_projection_solver
+        else:
+            return None
+
+    def _assemble_projected_rhs_residual(self):
+        """
+        solve(mass_matrix_form == self.G, self._projected_G, self.bcs_G)
+        """
+        if self.G is not None:
             self._assemble_rhs_residual()
-            self._rhs_projection_solver.solve(self._projected_G, self._G)
-            # solve(mass_matrix_form == self.G, self._G, self.bcs_G)
+            if self.project_rhs:
+                self._rhs_projection_solver.solve(self._projected_G, self._G)
+            # else assembled rhs residual that is saved in self._G is used
 
     @cached_property
     def _rhs_jac(self):

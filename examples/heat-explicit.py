@@ -1,7 +1,7 @@
 from firedrake import *
 import firedrake_ts
 
-mesh = UnitIntervalMesh(10)
+mesh = UnitIntervalMesh(11)
 V = FunctionSpace(mesh, "P", 1)
 
 u = Function(V)
