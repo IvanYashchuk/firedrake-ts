@@ -4,7 +4,6 @@ from contextlib import ExitStack
 
 from firedrake import dmhooks
 from firedrake import slate
-from firedrake import solving_utils
 from firedrake import ufl_expr
 from firedrake import utils
 from firedrake.petsc import PETSc, OptionsManager
@@ -13,13 +12,19 @@ from firedrake.bcs import DirichletBC
 from firedrake_ts.solving_utils import check_ts_convergence, _TSContext
 
 
-def check_pde_args(F, J, Jp):
+def check_pde_args(F, G, J, Jp):
     if not isinstance(F, (ufl.Form, slate.TensorBase)):
         raise TypeError(
             f"Provided residual is a '{type(F).__name__}', not a Form or Slate Tensor"
         )
     if len(F.arguments()) != 1:
         raise ValueError("Provided residual is not a linear form")
+    if G is not None and not isinstance(G, (ufl.Form, slate.TensorBase)):
+        raise TypeError(
+            f"Provided G residual is a '{type(G).__name__}', not a Form or Slate Tensor"
+        )
+    if G is not None and len(G.arguments()) != 1:
+        raise ValueError("Provided G residual is not a linear form")
     if not isinstance(J, (ufl.Form, slate.TensorBase)):
         raise TypeError(
             f"Provided Jacobian is a '{type(J).__name__}', not a Form or Slate Tensor"
@@ -47,7 +52,7 @@ def is_form_consistent(is_linear, bcs):
 
 
 class DAEProblem(object):
-    r"""Nonlinear variational problem in DAE form F(t, u, udot; v) = 0."""
+    r"""Nonlinear variational problem in DAE form F(u̇, u, t) = G(u, t)."""
 
     def __init__(
         self,
@@ -61,6 +66,7 @@ class DAEProblem(object):
         Jp=None,
         form_compiler_parameters=None,
         is_linear=False,
+        G=None,
     ):
         r"""
         :param F: the nonlinear form
@@ -69,7 +75,7 @@ class DAEProblem(object):
         :param tspan: the tuple for start time and end time
         :param time: the :class:`.Constant` for time-dependent weak forms
         :param bcs: the boundary conditions (optional)
-        :param J: the Jacobian J = sigma*dF/dudot + dF/du (optional)
+        :param J: the Jacobian J = sigma*dF/du̇ + dF/du (optional)
         :param Jp: a form used for preconditioning the linear system,
                  optional, if not supplied then the Jacobian itself
                  will be used.
@@ -77,6 +83,9 @@ class DAEProblem(object):
             compiler (optional)
         :is_linear: internally used to check if all domain/bc forms
             are given either in 'A == b' style or in 'F == 0' style.
+        :param G: G(t, u) term that will be treated explicitly
+            when using an IMEX method for solving F(u̇, u, t) = G(u, t).
+            If G is `None` the G(u, t) term in the equation is considered to be equal to zero.
         """
         from firedrake import solving
         from firedrake import function, Constant
@@ -91,6 +100,7 @@ class DAEProblem(object):
         self.udot = udot
         self.tspan = tspan
         self.F = F
+        self.G = G
         self.Jp = Jp
         if not isinstance(self.u, function.Function):
             raise TypeError(
@@ -113,12 +123,16 @@ class DAEProblem(object):
             F, u
         )
 
+        # Derive the Jacobian for the G residual
+        self.dGdu = ufl_expr.derivative(G, u) if G is not None else None
+
         # Argument checking
-        check_pde_args(self.F, self.J, self.Jp)
+        check_pde_args(self.F, self.G, self.J, self.Jp)
 
         # Store form compiler parameters
         self.form_compiler_parameters = form_compiler_parameters
         self._constant_jacobian = False
+        self._constant_rhs_jacobian = False
 
     def dirichlet_bcs(self):
         for bc in self.bcs:
@@ -174,9 +188,9 @@ class DAESolver(OptionsManager):
             {'snes_monitor': None}
         To use the ``pre_jacobian_callback`` or ``pre_function_callback``
         functionality, the user-defined function must accept the current
-        solution as a petsc4py Vec. Example usage is given below:
+        solution and the current time derivative as a petsc4py Vec. Example usage is given below:
         .. code-block:: python
-            def update_diffusivity(current_solution):
+            def update_diffusivity(current_solution, current_time_derivative):
                 with cursol.dat.vec_wo as v:
                     current_solution.copy(v)
                 solve(trial*test*dx == dot(grad(cursol), grad(test))*dx, diffusivity)
@@ -244,7 +258,15 @@ class DAESolver(OptionsManager):
 
         self.ts.setTime(problem.tspan[0])
         self.ts.setMaxTime(problem.tspan[1])
-        self.ts.setEquationType(PETSc.TS.EquationType.IMPLICIT)
+
+        if problem.G is None:
+            # If G is not provided set the equation type as implicit
+            # leave a default type otherwise
+            self.ts.setEquationType(PETSc.TS.EquationType.IMPLICIT)
+        else:
+            # If G is provided use the arkimex solver
+            self.set_default_parameter("ts_type", "arkimex")
+
         self.set_default_parameter("ts_exact_final_time", "stepover")
         # allow a certain number of failures (step will be rejected and retried)
         self.set_default_parameter("ts_max_snes_failures", 5)
@@ -280,6 +302,8 @@ class DAESolver(OptionsManager):
         """
         ctx.set_ifunction(self.ts)
         ctx.set_ijacobian(self.ts)
+        ctx.set_rhs_function(self.ts)
+        ctx.set_rhs_jacobian(self.ts)
         ctx.set_nullspace(
             nullspace,
             problem.J.arguments()[0].function_space()._ises,
