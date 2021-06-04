@@ -14,5 +14,5 @@ setup(
     version=version,
     author="Ivan Yashchuk",
     license="MIT",
-    packages=["firedrake_ts"],
+    packages=["firedrake_ts, firedrake_ts.adjoint"],
 )
