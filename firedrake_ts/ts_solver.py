@@ -311,7 +311,7 @@ class DAESolver(OptionsManager):
         """
         self._ctx.transfer_manager = manager
 
-    def solve(self, bounds=None):
+    def solve(self, u0, bounds=None):
         r"""Solve the time-dependent variational problem.
         :arg bounds: Optional bounds on the solution (lower, upper).
             ``lower`` and ``upper`` must both be
@@ -320,6 +320,8 @@ class DAESolver(OptionsManager):
            If bounds are provided the ``snes_type`` must be set to
            ``vinewtonssls`` or ``vinewtonrsls``.
         """
+        with self._problem.u.dat.vec_wo as u, u0.dat.vec as u0v:
+            u0v.copy(u)
 
         self._set_problem_eval_funcs(
             self._ctx,
