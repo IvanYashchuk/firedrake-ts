@@ -277,7 +277,7 @@ class DAESolver(OptionsManager, DAESolverMixin):
             ctx, problem, nullspace, nullspace_T, near_nullspace
         )
 
-        self.ts.setSaveTrajectory()
+        #self.ts.setSaveTrajectory()
         if problem.M:
             # Now create QuadratureTS for integrating the cost integral
             self.quad_ts = self.ts.createQuadratureTS(forward=True)
