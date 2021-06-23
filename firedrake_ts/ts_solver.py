@@ -386,7 +386,7 @@ class DAESolver(OptionsManager, DAESolverMixin):
         self._ctx.transfer_manager = manager
 
     @DAESolverMixin._ad_annotate_solve
-    def solve(self, u0, bounds=None):
+    def solve(self, u0=None, bounds=None):
         r"""Solve the time-dependent variational problem.
         :arg bounds: Optional bounds on the solution (lower, upper).
             ``lower`` and ``upper`` must both be
@@ -396,8 +396,9 @@ class DAESolver(OptionsManager, DAESolverMixin):
            ``vinewtonssls`` or ``vinewtonrsls``.
         """
 
-        with self._problem.u.dat.vec_wo as u, u0.dat.vec as u0v:
-            u0v.copy(u)
+        if u0:
+            with self._problem.u.dat.vec_wo as u, u0.dat.vec as u0v:
+                u0v.copy(u)
 
         # Necessary to reset the problem as ts.solve() starts from the last time step used.
         self.ts.setTimeStep(self._dt)
