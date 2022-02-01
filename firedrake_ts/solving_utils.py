@@ -6,6 +6,7 @@ from firedrake.ufl_expr import TestFunction
 import numpy
 
 import itertools
+from functools import partial
 from firedrake import homogenize, derivative, adjoint
 from pyadjoint import block_variable
 
@@ -183,13 +184,15 @@ class _TSContext(object):
         self.bv_indices_map = {}
 
     def create_assemble_residual(self):
-        from firedrake.assemble import create_assembly_callable
+        from firedrake.assemble import assemble
 
-        self._assemble_residual = create_assembly_callable(
+        self._assemble_residual = partial(
+            assemble,
             self._problem.F,
             tensor=self._F,
             bcs=self.bcs_F,
             form_compiler_parameters=self.fcp,
+            assembly_type="residual",
         )
 
     @property
@@ -789,14 +792,16 @@ class _TSContext(object):
 
     @cached_property
     def _assemble_jac(self):
-        from firedrake.assemble import create_assembly_callable
+        from firedrake.assemble import assemble
 
-        return create_assembly_callable(
+        return partial(
+            assemble,
             self.J,
             tensor=self._jac,
             bcs=self.bcs_J,
             form_compiler_parameters=self.fcp,
             mat_type=self.mat_type,
+            assembly_type="residual",
         )
 
     # The jacobian of the cost function has to be a dense matrix per PETSc requirements,
@@ -811,8 +816,6 @@ class _TSContext(object):
 
     @cached_property
     def _Mjac_x(self):
-        from firedrake import derivative
-        from firedrake.assemble import assemble
 
         local_dofs = self._Mjac_x_vec.dat.data.size
         djdu_transposed_mat = PETSc.Mat().createDense(
@@ -865,8 +868,6 @@ class _TSContext(object):
     @cached_property
     def _dFdp(self):
         # TODO another loop that it is the same than _Mjac_p and _Mjac_p_vecs... REFACTOR!!
-        from firedrake import derivative
-        from firedrake.assemble import assemble
 
         u = self._problem.u
         local_n_size = u.dat.data.size
