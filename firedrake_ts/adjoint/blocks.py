@@ -181,10 +181,7 @@ class DAESolverBlock(GenericSolveBlock):
 
         if self._ad_tsvs._problem.M:
             u_func, m = self._ad_tsvs.solve(u_func)
-            if isinstance(block_variable.output, float):
-                return m
-            else:
-                return u_func
+            return m if isinstance(block_variable.output, float) else u_func
         else:
             u_func = self._ad_tsvs.solve(u_func)
             return u_func
@@ -192,9 +189,7 @@ class DAESolverBlock(GenericSolveBlock):
     def _ad_assign_map(self, form):
         count_map = self._ad_tsvs._problem._ad_count_map
         assign_map = {}
-        form_ad_count_map = dict(
-            (count_map[coeff], coeff) for coeff in form.coefficients()
-        )
+        form_ad_count_map = {count_map[coeff]: coeff for coeff in form.coefficients()}
         for block_variable in self.get_dependencies():
             coeff = block_variable.output
             if isinstance(coeff, (self.backend.Coefficient, self.backend.Constant)):

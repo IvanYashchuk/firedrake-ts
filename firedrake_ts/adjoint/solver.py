@@ -26,11 +26,7 @@ class DAEProblemMixin:
             self._ad_tspan = self.tspan
             self._ad_bcs = self.bcs
             self._ad_J = self.J
-            if self.M:
-                self._ad_M = self.M
-            else:
-                self._ad_M = None
-
+            self._ad_M = self.M or None
             self._ad_kwargs = {
                 "Jp": self.Jp,
                 "form_compiler_parameters": self.form_compiler_parameters,
@@ -114,14 +110,8 @@ class DAESolverMixin:
                 if problem.M:
                     out_m = create_overloaded_object(out_m)
                     block.add_output(out_m.block_variable)
-                    block.add_output(self._ad_problem._ad_u.create_block_variable())
-                else:
-                    block.add_output(self._ad_problem._ad_u.create_block_variable())
-
-            if problem.M:
-                return (out_u, out_m)
-            else:
-                return out
+                block.add_output(self._ad_problem._ad_u.create_block_variable())
+            return (out_u, out_m) if problem.M else out
 
         return wrapper
 
@@ -167,25 +157,26 @@ class DAESolverMixin:
                 _ad_count_map[J_replace_map[coeff]] = coeff.count()
 
             # TODO is there a better way to avoid checking for this property everywhere?
-            if hasattr(problem, "M") and problem.M:
-                if coeff in M_coefficients and coeff not in M_replace_map:
-                    if coeff in F_replace_map:
-                        M_replace_map[coeff] = F_replace_map[coeff]
-                    elif isinstance(coeff, Constant):
-                        M_replace_map[coeff] = copy.deepcopy(coeff)
-                    else:
-                        M_replace_map[coeff] = coeff.copy()
-                    _ad_count_map[M_replace_map[coeff]] = coeff.count()
+            if (
+                hasattr(problem, "M")
+                and problem.M
+                and coeff in M_coefficients
+                and coeff not in M_replace_map
+            ):
+                if coeff in F_replace_map:
+                    M_replace_map[coeff] = F_replace_map[coeff]
+                elif isinstance(coeff, Constant):
+                    M_replace_map[coeff] = copy.deepcopy(coeff)
+                else:
+                    M_replace_map[coeff] = coeff.copy()
+                _ad_count_map[M_replace_map[coeff]] = coeff.count()
 
         # TODO is there a better way to avoid checking for this property everywhere?
         if hasattr(problem, "M") and problem.M:
             M_rep = replace(problem.M, M_replace_map)
         else:
             M_rep = None
-        if problem.J:
-            J_repl = replace(problem.J, J_replace_map)
-        else:
-            J_repl = None
+        J_repl = replace(problem.J, J_replace_map) if problem.J else None
         tsvp = DAEProblem(
             replace(problem.F, F_replace_map),
             F_replace_map[problem.u],
