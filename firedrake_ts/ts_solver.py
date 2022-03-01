@@ -277,7 +277,7 @@ class DAESolver(OptionsManager, DAESolverMixin):
             ctx, problem, nullspace, nullspace_T, near_nullspace
         )
 
-        #self.ts.setSaveTrajectory()
+        # self.ts.setSaveTrajectory()
         if problem.M:
             # Now create QuadratureTS for integrating the cost integral
             self.quad_ts = self.ts.createQuadratureTS(forward=True)
@@ -386,7 +386,7 @@ class DAESolver(OptionsManager, DAESolverMixin):
         self._ctx.transfer_manager = manager
 
     @DAESolverMixin._ad_annotate_solve
-    def solve(self, u0=None, bounds=None):
+    def solve(self, bounds=None):
         r"""Solve the time-dependent variational problem.
         :arg bounds: Optional bounds on the solution (lower, upper).
             ``lower`` and ``upper`` must both be
@@ -395,10 +395,6 @@ class DAESolver(OptionsManager, DAESolverMixin):
            If bounds are provided the ``snes_type`` must be set to
            ``vinewtonssls`` or ``vinewtonrsls``.
         """
-
-        if u0:
-            with self._problem.u.dat.vec_wo as u, u0.dat.vec as u0v:
-                u0v.copy(u)
 
         # Necessary to reset the problem as ts.solve() starts from the last time step used.
         self.ts.setTimeStep(self._dt)

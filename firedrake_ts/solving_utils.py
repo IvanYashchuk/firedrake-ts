@@ -875,6 +875,8 @@ class _TSContext(object):
 
         local_m_size = 0
         m = 0
+        # Build a matrix dFdp, we need to know the total length of p
+        # Count all the contributions from the dependencies.
         block_outputs = [dep.output for dep in self.block.get_outputs()]
         for block_variable in self.block.get_dependencies():
             coeff = block_variable.output

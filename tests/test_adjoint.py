@@ -54,7 +54,7 @@ def test_shape_derivative(solver_parameters):
     solver_parameters.pop("ts_theta_endpoint")
     solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
-    u = solver.solve(u)
+    u = solver.solve()
 
     m = assemble(inner(u, u) * dx)
     print(f"m: {m}")
@@ -118,7 +118,7 @@ def test_time_dependent_bcs(control, solver_parameters):
         monitor_callback=apply_time_bcs,
     )
 
-    u = solver.solve(u)
+    u = solver.solve()
 
     m = assemble(inner(u, u) * dx)
     print(f"m: {m}")
@@ -162,7 +162,7 @@ def test_burgers(control, solver_parameters):
     solver_parameters.pop("ts_theta_endpoint")
     solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
-    u = solver.solve(u)
+    u = solver.solve()
 
     m = assemble(inner(u, u) * dx)
     print(f"m: {m}")
@@ -188,8 +188,6 @@ def test_integral_cost_function_recompute(control, solver_parameters):
     a = Function(V).interpolate(sin(x[0]))
     if control == "constant":
         f = Constant(5.0)
-    elif control == "function":
-        f = Function(V).interpolate(Constant(5.0))
     else:
         f = Function(V).interpolate(Constant(5.0))
     F = inner(u_t, v) * dx + inner(grad(u), grad(v)) * dx - a * f * v * dx
@@ -203,7 +201,7 @@ def test_integral_cost_function_recompute(control, solver_parameters):
     problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc, M=M)
     solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
-    u, m = solver.solve(u)
+    u, m = solver.solve()
 
     c = Control(f)
     Jhat = ReducedFunctional(m, c)
@@ -233,7 +231,7 @@ def test_initial_condition_recompute(solver_parameters):
     problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc, M=M)
     solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
-    u, m = solver.solve(u)
+    u, m = solver.solve()
 
     c = Control(ic)
     Jhat = ReducedFunctional(m, c)
@@ -263,7 +261,7 @@ def test_initial_condition_adjoint(solver_parameters):
     problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc)
     solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
-    u_fin = solver.solve(u)
+    u_fin = solver.solve()
     m = assemble(u_fin * u_fin * dx)
 
     c = Control(ic)
@@ -307,7 +305,7 @@ def test_integral_cost_function_adjoint(control, solver_parameters):
     problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc, M=M)
     solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
-    u, m = solver.solve(u)
+    u, m = solver.solve()
 
     c = Control(f)
     Jhat = ReducedFunctional(m, c)
@@ -331,13 +329,9 @@ def test_integral_control_in_cost_function_adjoint(control, solver_parameters):
     if control == "constant":
         f = Constant(5.0)
         h = Constant(1.0)
-    elif control == "function":
-        f = Function(V).interpolate(Constant(5.0))
-        h = Function(V).interpolate(Constant(1.0))
     else:
         f = Function(V).interpolate(Constant(5.0))
         h = Function(V).interpolate(Constant(1.0))
-
     F = inner(u_t, v) * dx + inner(grad(u), grad(v)) * dx - f * v * dx
 
     bc = DirichletBC(V, 0.0, "on_boundary")
@@ -350,7 +344,7 @@ def test_integral_control_in_cost_function_adjoint(control, solver_parameters):
     problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc, M=M)
     solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
-    u, m = solver.solve(u)
+    u, m = solver.solve()
 
     c = Control(f)
     Jhat = ReducedFunctional(m, c)
@@ -388,7 +382,7 @@ def test_terminal_cost_function_multiple_deps_in_form_adjoint(solver_parameters)
     problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc)
     solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
-    u = solver.solve(u)
+    u = solver.solve()
 
     J = assemble(u * u * dx)
 
@@ -422,7 +416,7 @@ def test_terminal_cost_function_adjoint(solver_parameters):
     problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc)
     solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
-    u = solver.solve(u)
+    u = solver.solve()
 
     J = assemble(u * u * dx)
 
@@ -456,7 +450,7 @@ def test_combined_cost_function_adjoint(solver_parameters):
     problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc, M=M)
     solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
-    u, m = solver.solve(u)
+    u, m = solver.solve()
 
     c = Control(f)
 
@@ -499,7 +493,7 @@ def test_multiple_coeffs(solver_parameters):
     problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 0.3), bcs=bc, M=M)
     solver = firedrake_ts.DAESolver(problem, solver_parameters=solver_parameters)
 
-    u, m = solver.solve(u)
+    u, m = solver.solve()
 
     c = Control(f)
 
@@ -529,17 +523,17 @@ if __name__ == "__main__":
         "ts_theta_theta": 0.5,
         "ts_theta_endpoint": None,
     }
+    # test_initial_condition_recompute(params)
+    # test_integral_cost_function_recompute("function", params)
+    # test_integral_cost_function_recompute("constant", params)
+    test_initial_condition_adjoint(params)
+    # test_combined_cost_function_adjoint(params)
     # test_integral_cost_function_adjoint("function", params)
     # test_integral_control_in_cost_function_adjoint("function", params)
-    # test_integral_cost_function_recompute("function", params)
     # test_integral_cost_function_adjoint("constant", params)
     # test_integral_control_in_cost_function_adjoint("constant", params)
-    # test_integral_cost_function_recompute("constant", params)
     # test_terminal_cost_function_adjoint(params)
-    # test_combined_cost_function_adjoint(params)
-    # test_initial_condition_recompute(params)
-    # test_initial_condition_adjoint(params)
     # test_burgers("function", params)
     # test_time_dependent_bcs("function", params)
     # test_terminal_cost_function_multiple_deps_in_form_adjoint(params)
-    test_multiple_coeffs(params)
+    # test_multiple_coeffs(params)

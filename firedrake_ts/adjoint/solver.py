@@ -65,7 +65,7 @@ class DAESolverMixin:
             annotate = annotate_tape(kwargs)
             problem = self._problem
             if annotate:
-                u0 = args[0]
+                u0 = problem._ad_u.copy(deepcopy=True)
                 tape = get_working_tape()
                 problem = self._ad_problem
                 sb_kwargs = DAESolverBlock.pop_kwargs(kwargs)
@@ -118,7 +118,7 @@ class DAESolverMixin:
     @no_annotations
     def _ad_problem_clone(self, problem, dependencies):
         """Replaces every coefficient in the residual and jacobian with a deepcopy to return
-        a clone of the original NonlinearVariationalProblem instance. We'll be modifying the
+        a clone of the original DAEProblem instance. We'll be modifying the
         numerical values of the coefficients in the residual and jacobian, so in order not to
         affect the user-defined self._ad_problem.F, self._ad_problem.J and self._ad_problem.u
         expressions, we'll instead create clones of them.

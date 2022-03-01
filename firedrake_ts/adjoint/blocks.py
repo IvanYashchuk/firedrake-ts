@@ -180,10 +180,10 @@ class DAESolverBlock(GenericSolveBlock):
         u = self._ad_tsvs._problem.u
 
         if self._ad_tsvs._problem.M:
-            u_func, m = self._ad_tsvs.solve(u_func)
+            u_func, m = self._ad_tsvs.solve()
             return m if isinstance(block_variable.output, float) else u_func
         else:
-            u_func = self._ad_tsvs.solve(u_func)
+            u_func = self._ad_tsvs.solve()
             return u_func
 
     def _ad_assign_map(self, form):
