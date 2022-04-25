@@ -164,8 +164,7 @@ class _TSContext(object):
             self.F,
             tensor=self._F,
             bcs=self.bcs_F,
-            form_compiler_parameters=self.fcp,
-            assembly_type="residual",
+            form_compiler_parameters=self.fcp
         )
 
         if self.G is not None:
@@ -174,8 +173,7 @@ class _TSContext(object):
                 self.G,
                 tensor=self._G,
                 bcs=self.bcs_G,
-                form_compiler_parameters=self.fcp,
-                assembly_type="residual",
+                form_compiler_parameters=self.fcp
             )
             self.rhs_projection_parameters = rhs_projection_parameters
             self.project_rhs = project_rhs
@@ -588,8 +586,7 @@ class _TSContext(object):
             tensor=self._jac,
             bcs=self.bcs_J,
             form_compiler_parameters=self.fcp,
-            mat_type=self.mat_type,
-            assembly_type="residual",
+            mat_type=self.mat_type
         )
 
     @cached_property
@@ -620,8 +617,7 @@ class _TSContext(object):
             tensor=self._pjac,
             bcs=self.bcs_Jp,
             form_compiler_parameters=self.fcp,
-            mat_type=self.pmat_type,
-            assembly_type="residual",
+            mat_type=self.pmat_type
         )
 
     @cached_property
@@ -696,8 +692,7 @@ class _TSContext(object):
                 tensor=self._rhs_jac,
                 bcs=self.bcs_dGdu,
                 form_compiler_parameters=self.fcp,
-                mat_type=self.mat_type,
-                assembly_type="residual",
+                mat_type=self.mat_type
             )
         else:
             return None
