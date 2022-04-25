@@ -3,8 +3,9 @@
 # and
 # https://github.com/firedrakeproject/firedrake-bench/blob/master/cahn_hilliard/firedrake_cahn_hilliard.py
 
-from firedrake import *
 import firedrake_ts
+from firedrake import *
+from pyop2 import op2
 
 # Model parameters
 lmbda = 1.0e-02  # surface parameter
@@ -34,8 +35,8 @@ par_loop(
     init_code,
     direct,
     {"A": (u[0], WRITE)},
-    kernel_kwargs={"headers": ["#include <stdlib.h>"]},
-    user_code=user_code,
+    kernel_kwargs={"headers": ["#include <stdlib.h>"],
+                   "user_code": user_code}
 )
 
 # Compute the chemical potential df/dc
