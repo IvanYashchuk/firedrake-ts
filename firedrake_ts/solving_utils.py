@@ -80,6 +80,7 @@ class _TSContext(object):
                  rhs_projection_parameters=None):
         from firedrake.assemble import get_assembler
 
+        print(f'{project_rhs=}')
         if pmat_type is None:
             pmat_type = mat_type
         self.mat_type = mat_type
@@ -140,18 +141,18 @@ class _TSContext(object):
         self.bcs_F = tuple(bc.extract_form('F') for bc in problem.bcs)
         self.bcs_J = tuple(bc.extract_form('J') for bc in problem.bcs)
         self.bcs_Jp = tuple(bc.extract_form('Jp') for bc in problem.bcs)
-        self.bcs_G = tuple(bc.extract_form('G') for bc in problem.bcs)
-        self.bcs_dGdu = tuple(bc.extract_form('dGdu') for bc in problem.bcs)
+        self.bcs_G = tuple(bc.extract_form('F') for bc in problem.bcs)
+        self.bcs_dGdu = tuple(bc.extract_form('J') for bc in problem.bcs)
 
         self._assemble_residual = get_assembler(self.F, bcs=self.bcs_F,
                                                 form_compiler_parameters=self.fcp,
                                                 zero_bc_nodes=True).assemble
-
- 
+        
+        
         if self.G is not None:
-	        self._assemble_rhs_residual = get_assembler(self.G, bcs=self.bcs_G,
-                                                form_compiler_parameters=self.fcp,
-                                                zero_bc_nodes=True).assemble
+            self._assemble_rhs_residual = get_assembler(self.G, bcs=self.bcs_G,
+                                                        form_compiler_parameters=self.fcp,
+                                                        zero_bc_nodes=True).assemble
             self.rhs_projection_parameters = rhs_projection_parameters
             self.project_rhs = project_rhs
             self._G_or_projected_G = self._projected_G if self.project_rhs else self._G
@@ -231,11 +232,7 @@ class _TSContext(object):
     def set_rhs_jacobian(self, ts):
         r"""Set the function to compute the Jacobian of G, where U_t = G(U,t), as well as the location to store the matrix."""
         if self.G is not None:
-            ts.setRHSJacobian(
-                self.form_rhs_jacobian,
-                J=self._rhs_jac.petscmat,
-                P=self._rhs_pjac.petscmat,
-            )
+            ts.setRHSJacobian(self.form_rhs_jacobian, J=self._rhs_jac.petscmat, P=self._rhs_pjac.petscmat)
 
     def set_nullspace(self, nullspace, ises=None, transpose=False, near=False):
         if nullspace is None:
@@ -260,8 +257,6 @@ class _TSContext(object):
         problem = self._problem
         splitter = ExtractSubBlock()
         for field in fields:
-            F = splitter.split(problem.F, argument_indices=(field, ))
-            J = splitter.split(problem.J, argument_indices=(field, field))
             us = problem.u.subfunctions
             V = F.arguments()[0].function_space()
             # Exposition:
@@ -306,6 +301,8 @@ class _TSContext(object):
             # solving for, and some spaces that have just become
             # coefficients in the new form.
             u = as_vector(vec)
+            F = splitter.split(problem.F, argument_indices=(field, ))
+            J = splitter.split(problem.J, argument_indices=(field, field))
             F = replace(F, {problem.u: u})
             J = replace(J, {problem.u: u})
             if problem.Jp is not None:
@@ -327,10 +324,10 @@ class _TSContext(object):
                 if bc_temp is not None:
                     bcs.append(bc_temp)
             new_problem = DAEP(F, subu,
-            				   problem.udot, problem.tspan,
-                			bcs=bcs, J=J, Jp=Jp,
-                form_compiler_parameters=problem.form_compiler_parameters,
-                G=G,)
+            		       problem.udot, problem.tspan,
+                	       bcs=bcs, J=J, Jp=Jp,
+                               form_compiler_parameters=problem.form_compiler_parameters,
+                               G=G)
             new_problem._constant_jacobian = problem._constant_jacobian
             splits.append(type(self)(new_problem, mat_type=self.mat_type, pmat_type=self.pmat_type,
                                      appctx=self.appctx,
@@ -360,7 +357,7 @@ class _TSContext(object):
         if ctx._pre_function_callback is not None:
             ctx._pre_function_callback(X, Xdot)
 
-        ctx._assemble_residual(tensor=ctx._F)
+        ctx._assemble_residual(ctx._F)
 
         if ctx._post_function_callback is not None:
             with ctx._F.dat.vec as F_:
@@ -400,10 +397,11 @@ class _TSContext(object):
             X.copy(v)
         with ctx._xdot.dat.vec_wo as v:
             Xdot.copy(v)
-        ctx._time.assign(t)  ## TODO why?
+        ctx._time.assign(t)
 
         if ctx._pre_jacobian_callback is not None:
             ctx._pre_jacobian_callback(X, Xdot)
+
         ctx._shift.assign(shift)
         ctx._assemble_jac(ctx._jac)
 
@@ -477,7 +475,7 @@ class _TSContext(object):
 
         # TODO: Add pre_rhs_jacobian_callback
 
-        ctx._assemble_rhs_jac()
+        ctx._assemble_rhs_jac(ctx._dGdu)
 
         # TODO: Add post_rhs_jacobian_callback
 
@@ -566,15 +564,15 @@ class _TSContext(object):
 
     @cached_property
     def _projected_G(self):
-        return cofunction.Cofunction(self.G.arguments()[0].function_space().dual())
+        return function.Function(self.G.arguments()[0].function_space())
 
     @cached_property
     def _rhs_projection_solver(self):
         if self.G is not None:
-            from firedrake import LinearSolver
+            from firedrake import LinearSolver, assemble, ufl_expr
 
             mass_matrix = assemble(
-                ufl_expr.derivative(self.F, self._xdot), bcs=self.bcs_G
+                ufl_expr.derivative(self.F, self._xdot), bcs=self.bcs_F
             )
 
             prefix = self.options_prefix or ""
@@ -594,7 +592,7 @@ class _TSContext(object):
         solve(mass_matrix_form == self.G, self._projected_G, self.bcs_G)
         """
         if self.G is not None:
-            self._assemble_rhs_residual()
+            self._assemble_rhs_residual(self._G)
             if self.project_rhs:
                 self._rhs_projection_solver.solve(self._projected_G, self._G)
             # else assembled rhs residual that is saved in self._G is used

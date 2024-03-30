@@ -11,19 +11,19 @@ from firedrake_ts.solving_utils import check_ts_convergence, _TSContext
 
 
 def check_pde_args(F, G, J, Jp):
-    if not isinstance(F, (ufl.BaseForm, slate.slate.TensorBase)):
+    if not isinstance(F, (ufl.BaseForm, slate.TensorBase)):
         raise TypeError("Provided residual is a '%s', not a BaseForm or Slate Tensor" % type(F).__name__)
     if len(F.arguments()) != 1:
         raise ValueError("Provided residual is not a linear form")
-    if G is not None and not isinstance(G, (ufl.BaseForm, slate.slate.TensorBase)):
+    if G is not None and not isinstance(G, (ufl.BaseForm, slate.TensorBase)):
         raise TypeError(f"Provided G residual is a '{type(G).__name__}', not a BaseForm or Slate Tensor")
     if G is not None and len(G.arguments()) != 1:
         raise ValueError("Provided G residual is not a linear form")
-    if not isinstance(J, (ufl.BaseForm, slate.slate.TensorBase)):
+    if not isinstance(J, (ufl.BaseForm, slate.TensorBase)):
         raise TypeError("Provided Jacobian is a '%s', not a BaseForm or Slate Tensor" % type(J).__name__)
     if len(J.arguments()) != 2:
         raise ValueError("Provided Jacobian is not a bilinear form")
-    if Jp is not None and not isinstance(Jp, (ufl.BaseForm, slate.slate.TensorBase)):
+    if Jp is not None and not isinstance(Jp, (ufl.BaseForm, slate.TensorBase)):
         raise TypeError("Provided preconditioner is a '%s', not a BaseForm or Slate Tensor" % type(Jp).__name__)
     if Jp is not None and len(Jp.arguments()) != 2:
         raise ValueError("Provided preconditioner is not a bilinear form")
@@ -104,9 +104,7 @@ class DAEProblem(object):
 
         # Use the user-provided Jacobian. If none is provided, derive
         # the Jacobian from the residual.
-        self.J = J or self.shift * ufl_expr.derivative(F, udot) + ufl_expr.derivative(
-            F, u
-        )
+        self.J = self.shift * ufl_expr.derivative(F, udot) + (J or ufl_expr.derivative(F, u))
 
         # Derive the Jacobian for the G residual
         self.dGdu = ufl_expr.derivative(G, u) if G is not None else None
@@ -237,12 +235,17 @@ class DAESolver(OptionsManager):
 
         self._ctx = ctx
         self._work = problem.u.dof_dset.layout_vec.duplicate()
-        self.ts.setDM(problem.dm)
 
+        self.ts.setDM(problem.dm)
         self.ts.setMonitor(monitor_callback)
 
         self.ts.setTime(problem.tspan[0])
         self.ts.setMaxTime(problem.tspan[1])
+
+        print(f'{self.ts.getProblemType()=} {self.ts.getEquationType()=}')
+        #self.ts.setProblemType(PETSc.TS.ProblemType.NONLINEAR)
+        #self.ts.setEquationType(PETSc.TS.EquationType.IMPLICIT)
+        #print(f'{self.ts.getProblemType()=} {self.ts.getEquationType()=}')
 
         if problem.G is None:
             # If G is not provided set the equation type as implicit
@@ -254,7 +257,7 @@ class DAESolver(OptionsManager):
 
         self.set_default_parameter("ts_exact_final_time", "stepover")
         # allow a certain number of failures (step will be rejected and retried)
-        self.set_default_parameter("ts_max_snes_failures", 5)
+        #self.set_default_parameter("ts_max_snes_failures", 5)
 
         self._set_problem_eval_funcs(
             ctx, problem, nullspace, nullspace_T, near_nullspace
@@ -354,11 +357,11 @@ class DAESolver(OptionsManager):
                 # Ensure options database has full set of options (so monitors
                 # work right)
                 for ctx in chain(
-                    (
-                        self.inserted_options(),
-                        dmhooks.add_hooks(dm, self, appctx=self._ctx),
-                    ),
-                    self._transfer_operators,
+                        (
+                            self.inserted_options(),
+                            dmhooks.add_hooks(dm, self, appctx=self._ctx),
+                        ),
+                        self._transfer_operators,
                 ):
                     stack.enter_context(ctx)
                 self.ts.solve(work)
