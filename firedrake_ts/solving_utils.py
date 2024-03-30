@@ -1,10 +1,10 @@
+from itertools import chain
+
 import numpy
 
-import functools
-import itertools
-
 from pyop2 import op2
-from firedrake import assemble, dmhooks, function, ufl_expr
+from firedrake_configuration import get_config
+from firedrake import function, cofunction, dmhooks
 from firedrake.exceptions import ConvergenceError
 from firedrake.petsc import PETSc
 from firedrake.formmanipulation import ExtractSubBlock
@@ -13,6 +13,7 @@ from firedrake.utils import cached_property
 
 
 TSReasons = _make_reasons(PETSc.TS.ConvergedReason())
+
 
 
 def check_ts_convergence(ts):
@@ -51,10 +52,10 @@ class _TSContext(object):
         ``"state"``.
     :arg pre_jacobian_callback: User-defined function called immediately
         before Jacobian assembly
-    :arg pre_function_callback: User-defined function called immediately
-        before residual assembly
     :arg post_jacobian_callback: User-defined function called immediately
         after Jacobian assembly
+    :arg pre_function_callback: User-defined function called immediately
+        before residual assembly
     :arg post_function_callback: User-defined function called immediately
         after residual assembly
     :arg options_prefix: The options prefix of the TS.
@@ -69,23 +70,15 @@ class _TSContext(object):
     get the context (which is one of these objects) to find the
     Firedrake level information.
     """
-
-    def __init__(
-        self,
-        problem,
-        mat_type,
-        pmat_type,
-        appctx=None,
-        pre_jacobian_callback=None,
-        pre_function_callback=None,
-        post_jacobian_callback=None,
-        post_function_callback=None,
-        options_prefix=None,
-        project_rhs=True,
-        rhs_projection_parameters=None,
-        transfer_manager=None,
-    ):
-        from firedrake.bcs import DirichletBC
+    @PETSc.Log.EventDecorator()
+    def __init__(self, problem, mat_type, pmat_type, appctx=None,
+                 pre_jacobian_callback=None, pre_function_callback=None,
+                 post_jacobian_callback=None, post_function_callback=None,
+                 options_prefix=None,
+                 transfer_manager=None,
+                 project_rhs=True,
+                 rhs_projection_parameters=None):
+        from firedrake.assemble import get_assembler
 
         if pmat_type is None:
             pmat_type = mat_type
@@ -93,8 +86,8 @@ class _TSContext(object):
         self.pmat_type = pmat_type
         self.options_prefix = options_prefix
 
-        matfree = mat_type == "matfree"
-        pmatfree = pmat_type == "matfree"
+        matfree = mat_type == 'matfree'
+        pmatfree = pmat_type == 'matfree'
 
         self._problem = problem
         self._pre_jacobian_callback = pre_jacobian_callback
@@ -144,37 +137,21 @@ class _TSContext(object):
             # pmat_type == mat_type and Jp_eq_J
             self.Jp = None
 
-        self.bcs_F = [
-            bc if isinstance(bc, DirichletBC) else bc._F for bc in problem.bcs
-        ]
-        self.bcs_G = [
-            bc if isinstance(bc, DirichletBC) else bc._G for bc in problem.bcs
-        ]
-        self.bcs_dGdu = [
-            bc if isinstance(bc, DirichletBC) else bc._dGdu for bc in problem.bcs
-        ]
-        self.bcs_J = [
-            bc if isinstance(bc, DirichletBC) else bc._J for bc in problem.bcs
-        ]
-        self.bcs_Jp = [
-            bc if isinstance(bc, DirichletBC) else bc._Jp for bc in problem.bcs
-        ]
-        self._assemble_residual = functools.partial(
-            assemble,
-            self.F,
-            tensor=self._F,
-            bcs=self.bcs_F,
-            form_compiler_parameters=self.fcp
-        )
+        self.bcs_F = tuple(bc.extract_form('F') for bc in problem.bcs)
+        self.bcs_J = tuple(bc.extract_form('J') for bc in problem.bcs)
+        self.bcs_Jp = tuple(bc.extract_form('Jp') for bc in problem.bcs)
+        self.bcs_G = tuple(bc.extract_form('G') for bc in problem.bcs)
+        self.bcs_dGdu = tuple(bc.extract_form('dGdu') for bc in problem.bcs)
 
+        self._assemble_residual = get_assembler(self.F, bcs=self.bcs_F,
+                                                form_compiler_parameters=self.fcp,
+                                                zero_bc_nodes=True).assemble
+
+ 
         if self.G is not None:
-            self._assemble_rhs_residual = functools.partial(
-                assemble,
-                self.G,
-                tensor=self._G,
-                bcs=self.bcs_G,
-                form_compiler_parameters=self.fcp
-            )
+	        self._assemble_rhs_residual = get_assembler(self.G, bcs=self.bcs_G,
+                                                form_compiler_parameters=self.fcp,
+                                                zero_bc_nodes=True).assemble
             self.rhs_projection_parameters = rhs_projection_parameters
             self.project_rhs = project_rhs
             self._G_or_projected_G = self._projected_G if self.project_rhs else self._G
@@ -217,10 +194,9 @@ class _TSContext(object):
 
             if managername is None:
                 from firedrake import TransferManager
-
                 transfer = TransferManager(use_averaging=True)
             else:
-                (modname, objname) = managername.rsplit(".", 1)
+                (modname, objname) = managername.rsplit('.', 1)
                 mod = __import__(modname)
                 obj = getattr(mod, objname)
                 if isinstance(obj, type):
@@ -240,7 +216,7 @@ class _TSContext(object):
     def set_ifunction(self, ts):
         r"""Set the function to compute F(t,U,U_t) where F() = 0 is the DAE to be solved."""
         with self._F.dat.vec_wo as v:
-            ts.setIFunction(self.form_function, f=v)
+            ts.setIFunction(self.form_function, v)
 
     def set_ijacobian(self, ts):
         r"""Set the function to compute the matrix dF/dU + a*dF/dU_t where F(t,U,U_t) is the function provided with set_ifunction()"""
@@ -250,7 +226,7 @@ class _TSContext(object):
         r"""Set the function to compute G(t,u) where F() = G() is the equation to be solved."""
         if self.G is not None:
             with self._G_or_projected_G.dat.vec_wo as v:
-                ts.setRHSFunction(self.form_rhs_function, f=v)
+                ts.setRHSFunction(self.form_rhs_function, v)
 
     def set_rhs_jacobian(self, ts):
         r"""Set the function to compute the Jacobian of G, where U_t = G(U,t), as well as the location to store the matrix."""
@@ -270,11 +246,11 @@ class _TSContext(object):
         if ises is not None:
             nullspace._apply(ises, transpose=transpose, near=near)
 
+    @PETSc.Log.EventDecorator()
     def split(self, fields):
         from firedrake import replace, as_vector, split
-        from firedrake_ts.ts_solver import DAEProblem
+        from firedrake_ts.ts_solver import DAEProblem as DAEP
         from firedrake.bcs import DirichletBC, EquationBC
-
         fields = tuple(tuple(f) for f in fields)
         splits = self._splits.get(tuple(fields))
         if splits is not None:
@@ -284,9 +260,9 @@ class _TSContext(object):
         problem = self._problem
         splitter = ExtractSubBlock()
         for field in fields:
-            F = splitter.split(problem.F, argument_indices=(field,))
+            F = splitter.split(problem.F, argument_indices=(field, ))
             J = splitter.split(problem.J, argument_indices=(field, field))
-            us = problem.u.split()
+            us = problem.u.subfunctions
             V = F.arguments()[0].function_space()
             # Exposition:
             # We are going to make a new solution Function on the sub
@@ -297,9 +273,9 @@ class _TSContext(object):
             # subspace that shares data.
             pieces = [us[i].dat for i in field]
             if len(pieces) == 1:
-                (val,) = pieces
+                val, = pieces
                 subu = function.Function(V, val=val)
-                subsplit = (subu,)
+                subsplit = (subu, )
             else:
                 val = op2.MixedDat(pieces)
                 subu = function.Function(V, val=val)
@@ -345,38 +321,20 @@ class _TSContext(object):
             bcs = []
             for bc in problem.bcs:
                 if isinstance(bc, DirichletBC):
-                    bc_temp = bc.reconstruct(
-                        field=field,
-                        V=V,
-                        g=bc.function_arg,
-                        sub_domain=bc.sub_domain,
-                        method=bc.method,
-                    )
+                    bc_temp = bc.reconstruct(field=field, V=V, g=bc.function_arg, sub_domain=bc.sub_domain)
                 elif isinstance(bc, EquationBC):
                     bc_temp = bc.reconstruct(field, V, subu, u)
                 if bc_temp is not None:
                     bcs.append(bc_temp)
-            new_problem = DAEProblem(
-                F,
-                subu,
-                problem.udot,
-                problem.tspan,
-                bcs=bcs,
-                J=J,
-                Jp=Jp,
+            new_problem = DAEP(F, subu,
+            				   problem.udot, problem.tspan,
+                			bcs=bcs, J=J, Jp=Jp,
                 form_compiler_parameters=problem.form_compiler_parameters,
-                G=G,
-            )
+                G=G,)
             new_problem._constant_jacobian = problem._constant_jacobian
-            splits.append(
-                type(self)(
-                    new_problem,
-                    mat_type=self.mat_type,
-                    pmat_type=self.pmat_type,
-                    appctx=self.appctx,
-                    transfer_manager=self.transfer_manager,
-                )
-            )
+            splits.append(type(self)(new_problem, mat_type=self.mat_type, pmat_type=self.pmat_type,
+                                     appctx=self.appctx,
+                                     transfer_manager=self.transfer_manager))
         return self._splits.setdefault(tuple(fields), splits)
 
     @staticmethod
@@ -402,7 +360,7 @@ class _TSContext(object):
         if ctx._pre_function_callback is not None:
             ctx._pre_function_callback(X, Xdot)
 
-        ctx._assemble_residual()
+        ctx._assemble_residual(tensor=ctx._F)
 
         if ctx._post_function_callback is not None:
             with ctx._F.dat.vec as F_:
@@ -442,20 +400,19 @@ class _TSContext(object):
             X.copy(v)
         with ctx._xdot.dat.vec_wo as v:
             Xdot.copy(v)
-        ctx._time.assign(t)
+        ctx._time.assign(t)  ## TODO why?
 
         if ctx._pre_jacobian_callback is not None:
             ctx._pre_jacobian_callback(X, Xdot)
-
         ctx._shift.assign(shift)
-        ctx._assemble_jac()
+        ctx._assemble_jac(ctx._jac)
 
         if ctx._post_jacobian_callback is not None:
             ctx._post_jacobian_callback(X, Xdot, J)
 
         if ctx.Jp is not None:
             assert P.handle == ctx._pjac.petscmat.handle
-            ctx._assemble_pjac()
+            ctx._assemble_pjac(ctx._pjac)
 
         ises = problem.J.arguments()[0].function_space()._ises
         ctx.set_nullspace(ctx._nullspace, ises, transpose=False, near=False)
@@ -538,7 +495,6 @@ class _TSContext(object):
         :arg P: the preconditioner matrix (a Mat)
         """
         from firedrake.bcs import DirichletBC
-
         dm = ksp.getDM()
         ctx = dmhooks.get_appctx(dm)
         problem = ctx._problem
@@ -552,85 +508,65 @@ class _TSContext(object):
 
         fine = ctx._fine
         if fine is not None:
-            manager = dmhooks.get_transfer_operators(fine._x.function_space().dm)
+            manager = dmhooks.get_transfer_manager(fine._x.function_space().dm)
             manager.inject(fine._x, ctx._x)
 
-            for bc in itertools.chain(*ctx._problem.bcs):
+            for bc in chain(*ctx._problem.bcs):
                 if isinstance(bc, DirichletBC):
                     bc.apply(ctx._x)
 
-        ctx._assemble_jac()
-
+        ctx._assemble_jac(ctx._jac)
         if ctx.Jp is not None:
             assert P.handle == ctx._pjac.petscmat.handle
-            ctx._assemble_pjac()
+            ctx._assemble_pjac(ctx._pjac)
+
+    @cached_property
+    def _assembler_jac(self):
+        from firedrake.assemble import get_assembler
+        return get_assembler(self.J, bcs=self.bcs_J, form_compiler_parameters=self.fcp, mat_type=self.mat_type, options_prefix=self.options_prefix, appctx=self.appctx)
 
     @cached_property
     def _jac(self):
-        from firedrake.assemble import allocate_matrix
-
-        return allocate_matrix(
-            self.J,
-            bcs=self.bcs_J,
-            form_compiler_parameters=self.fcp,
-            mat_type=self.mat_type,
-            appctx=self.appctx,
-            options_prefix=self.options_prefix,
-        )
+        return self._assembler_jac.allocate()
 
     @cached_property
     def _assemble_jac(self):
-        return functools.partial(
-            assemble,
-            self.J,
-            tensor=self._jac,
-            bcs=self.bcs_J,
-            form_compiler_parameters=self.fcp,
-            mat_type=self.mat_type
-        )
+        return self._assembler_jac.assemble
 
     @cached_property
     def is_mixed(self):
         return self._jac.block_shape != (1, 1)
 
     @cached_property
+    def _assembler_pjac(self):
+        from firedrake.assemble import get_assembler
+        if self.mat_type != self.pmat_type or self._problem.Jp is not None:
+            return get_assembler(self.Jp, bcs=self.bcs_Jp, form_compiler_parameters=self.fcp, mat_type=self.pmat_type, options_prefix=self.options_prefix, appctx=self.appctx)
+        else:
+            return self._assembler_jac
+
+    @cached_property
     def _pjac(self):
         if self.mat_type != self.pmat_type or self._problem.Jp is not None:
-            from firedrake.assemble import allocate_matrix
-
-            return allocate_matrix(
-                self.Jp,
-                bcs=self.bcs_Jp,
-                form_compiler_parameters=self.fcp,
-                mat_type=self.pmat_type,
-                appctx=self.appctx,
-                options_prefix=self.options_prefix,
-            )
+            return self._assembler_pjac.allocate()
         else:
             return self._jac
 
     @cached_property
     def _assemble_pjac(self):
-        return functools.partial(
-            assemble,
-            self.Jp,
-            tensor=self._pjac,
-            bcs=self.bcs_Jp,
-            form_compiler_parameters=self.fcp,
-            mat_type=self.pmat_type
-        )
+        return self._assembler_pjac.assemble
 
     @cached_property
     def _F(self):
-        return function.Function(self.F.arguments()[0].function_space())
+        return cofunction.Cofunction(self.F.arguments()[0].function_space().dual())
 
     @cached_property
     def _G(self):
-        return function.Function(self.G.arguments()[0].function_space())
+        return cofunction.Cofunction(self.G.arguments()[0].function_space().dual())
 
     @cached_property
     def _projected_G(self):
-        return function.Function(self.G.arguments()[0].function_space())
+        return cofunction.Cofunction(self.G.arguments()[0].function_space().dual())
 
     @cached_property
     def _rhs_projection_solver(self):
@@ -666,16 +602,7 @@ class _TSContext(object):
     @cached_property
     def _rhs_jac(self):
         if self.G is not None:
-            from firedrake.assemble import allocate_matrix
-
-            return allocate_matrix(
-                self.dGdu,
-                bcs=self.bcs_dGdu,
-                form_compiler_parameters=self.fcp,
-                mat_type=self.mat_type,
-                appctx=self.appctx,
-                options_prefix=self.options_prefix,
-            )
+	        return self._assembler_rhs_jac.allocate()
         else:
             return None
 
@@ -686,17 +613,15 @@ class _TSContext(object):
     @cached_property
     def _assemble_rhs_jac(self):
         if self.G is not None:
-            return functools.partial(
-                assemble,
-                self.dGdu,
-                tensor=self._rhs_jac,
-                bcs=self.bcs_dGdu,
-                form_compiler_parameters=self.fcp,
-                mat_type=self.mat_type
-            )
+	        return self._assembler_rhs_jac.assemble
         else:
             return None
 
     @cached_property
     def _assemble_rhs_pjac(self):
         return self._assemble_rhs_jac
+
+    @cached_property
+    def _assembler_rhs_jac(self):
+        from firedrake.assemble import get_assembler
+        return get_assembler(self.dGdu, bcs=self.bcs_dGdu, form_compiler_parameters=self.fcp, mat_type=self.mat_type, options_prefix=self.options_prefix, appctx=self.appctx)
