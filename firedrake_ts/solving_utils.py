@@ -8,8 +8,11 @@ from firedrake import function, cofunction, dmhooks
 from firedrake.exceptions import ConvergenceError
 from firedrake.petsc import PETSc
 from firedrake.formmanipulation import ExtractSubBlock
-from firedrake.solving_utils import _make_reasons
 from firedrake.utils import cached_property
+from firedrake.logging import warning
+
+
+from firedrake.solving_utils import _make_reasons
 
 
 TSReasons = _make_reasons(PETSc.TS.ConvergedReason())
@@ -80,7 +83,6 @@ class _TSContext(object):
                  rhs_projection_parameters=None):
         from firedrake.assemble import get_assembler
 
-        print(f'{project_rhs=}')
         if pmat_type is None:
             pmat_type = mat_type
         self.mat_type = mat_type
@@ -257,6 +259,8 @@ class _TSContext(object):
         problem = self._problem
         splitter = ExtractSubBlock()
         for field in fields:
+            F = splitter.split(problem.F, argument_indices=(field, ))
+            J = splitter.split(problem.J, argument_indices=(field, field))
             us = problem.u.subfunctions
             V = F.arguments()[0].function_space()
             # Exposition:
@@ -301,8 +305,6 @@ class _TSContext(object):
             # solving for, and some spaces that have just become
             # coefficients in the new form.
             u = as_vector(vec)
-            F = splitter.split(problem.F, argument_indices=(field, ))
-            J = splitter.split(problem.J, argument_indices=(field, field))
             F = replace(F, {problem.u: u})
             J = replace(J, {problem.u: u})
             if problem.Jp is not None:
@@ -357,7 +359,7 @@ class _TSContext(object):
         if ctx._pre_function_callback is not None:
             ctx._pre_function_callback(X, Xdot)
 
-        ctx._assemble_residual(ctx._F)
+        ctx._assemble_residual(tensor=ctx._F)
 
         if ctx._post_function_callback is not None:
             with ctx._F.dat.vec as F_:
@@ -594,6 +596,8 @@ class _TSContext(object):
         if self.G is not None:
             self._assemble_rhs_residual(self._G)
             if self.project_rhs:
+                # TODO maybe the riesz_repre is the correct way?
+                #assign(self._projected_G, self._G.riesz_representation())
                 self._rhs_projection_solver.solve(self._projected_G, self._G)
             # else assembled rhs residual that is saved in self._G is used
 
