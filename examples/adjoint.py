@@ -63,7 +63,9 @@ dJdu = fd.assemble(fd.derivative(J, u))
 with dJdu.dat.vec as vec:
     dJdu_vec = vec
 
-print(f"Norm of dJdu before the adjoint solve: {fd.norm(dJdu)}")
+fdJdu=dJdu.riesz_representation()
+    
+print(f"Norm of dJdu before the adjoint solve: {dJdu_vec.norm()=} {fd.norm(fdJdu)=}")
 
 # setCostGradients accepts two PETSc Vecs
 # J is the objective function
@@ -75,7 +77,9 @@ ts.setCostGradients(dJdu_vec, None)
 
 solver.adjoint_solve()
 
-print(f"Norm of dJdu after the adjoint solve: {fd.norm(dJdu)}")
+fdJdu=dJdu.riesz_representation()
+print(f"Norm of dJdu after the adjoint solve: {dJdu_vec.norm()=} {fd.norm(fdJdu)=}")
+
 
 adj_out = fd.File("result/adj.pvd")
-adj_out.write(dJdu, time=0)
+adj_out.write(fdJdu, time=0)

@@ -5,7 +5,7 @@
 
 import firedrake_ts
 from firedrake import *
-from pyop2 import op2
+import numpy as np
 
 # Model parameters
 lmbda = 1.0e-02  # surface parameter
@@ -26,18 +26,6 @@ u_t = Function(ME)  # time derivative
 c, mu = split(u)
 c_t, mu_t = split(u_t)
 
-# Create intial conditions and interpolate
-init_code = "A[0] = 0.63 + 0.02*(0.5 - (double)random()/RAND_MAX);"
-user_code = """int __rank;
-MPI_Comm_rank(MPI_COMM_WORLD, &__rank);
-srandom(2 + __rank);"""
-par_loop(
-    init_code,
-    direct,
-    {"A": (u[0], WRITE)},
-    kernel_kwargs={"headers": ["#include <stdlib.h>"],
-                   "user_code": user_code}
-)
 
 # Compute the chemical potential df/dc
 c = variable(c)
@@ -49,6 +37,12 @@ F0 = c_t * q * dx + dot(grad(mu), grad(q)) * dx
 F1 = mu * v * dx - dfdc * v * dx - lmbda * dot(grad(c), grad(v)) * dx
 F = F0 + F1
 
+rng = np.random.default_rng(11)
+c , mu = u.subfunctions
+with c.dat.vec as vv:
+    vv[:]=0.63 + 0.2*(0.5-rng.random(vv.size))
+
+    
 pc = "fieldsplit"
 ksp = "lgmres"
 inner_ksp = "preonly"
@@ -77,9 +71,9 @@ params = {
 
 params["snes_monitor"] = None
 params["ts_monitor"] = None
-params["ts_view"] = None
+#params["ts_view"] = None
 
-problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 50 * dt))
+problem = firedrake_ts.DAEProblem(F, u, u_t, (0.0, 2 * dt))
 solver = firedrake_ts.DAESolver(problem, solver_parameters=params)
 
 if pc in ["fieldsplit", "ilu"]:
