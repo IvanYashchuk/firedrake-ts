@@ -39,11 +39,11 @@ F = F0 + F1
 
 rng = np.random.default_rng(11)
 c , mu = u.subfunctions
-with c.dat.vec as vv:
-    vv[:]=0.63 + 0.2*(0.5-rng.random(vv.size))
+with c.dat.vec as v:
+    v[:]=0.63 + 0.2*(0.5-rng.random(v.size))
 
     
-pc = "fieldsplit"
+pc = "lu" #"fieldsplit"
 ksp = "lgmres"
 inner_ksp = "preonly"
 maxit = 1
