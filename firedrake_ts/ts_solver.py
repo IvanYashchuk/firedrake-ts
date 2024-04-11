@@ -242,11 +242,6 @@ class DAESolver(OptionsManager):
         self.ts.setTime(problem.tspan[0])
         self.ts.setMaxTime(problem.tspan[1])
 
-        print(f'{self.ts.getProblemType()=} {self.ts.getEquationType()=}')
-        #self.ts.setProblemType(PETSc.TS.ProblemType.NONLINEAR)
-        #self.ts.setEquationType(PETSc.TS.EquationType.IMPLICIT)
-        #print(f'{self.ts.getProblemType()=} {self.ts.getEquationType()=}')
-
         if problem.G is None:
             # If G is not provided set the equation type as implicit
             # leave a default type otherwise
