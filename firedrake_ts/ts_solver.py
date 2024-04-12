@@ -2,53 +2,38 @@ import ufl
 from itertools import chain
 from contextlib import ExitStack
 
-from firedrake import dmhooks
-from firedrake import slate
-from firedrake import ufl_expr
-from firedrake import utils
-from firedrake.petsc import PETSc, OptionsManager
+from firedrake import dmhooks, slate, solving, solving_utils, ufl_expr, utils
+from firedrake import function
+from firedrake.petsc import PETSc, OptionsManager, flatten_parameters
 from firedrake.bcs import DirichletBC
 
 from firedrake_ts.solving_utils import check_ts_convergence, _TSContext
 
 
 def check_pde_args(F, G, J, Jp):
-    if not isinstance(F, (ufl.Form, slate.TensorBase)):
-        raise TypeError(
-            f"Provided residual is a '{type(F).__name__}', not a Form or Slate Tensor"
-        )
+    if not isinstance(F, (ufl.BaseForm, slate.TensorBase)):
+        raise TypeError("Provided residual is a '%s', not a BaseForm or Slate Tensor" % type(F).__name__)
     if len(F.arguments()) != 1:
         raise ValueError("Provided residual is not a linear form")
-    if G is not None and not isinstance(G, (ufl.Form, slate.TensorBase)):
-        raise TypeError(
-            f"Provided G residual is a '{type(G).__name__}', not a Form or Slate Tensor"
-        )
+    if G is not None and not isinstance(G, (ufl.BaseForm, slate.TensorBase)):
+        raise TypeError(f"Provided G residual is a '{type(G).__name__}', not a BaseForm or Slate Tensor")
     if G is not None and len(G.arguments()) != 1:
         raise ValueError("Provided G residual is not a linear form")
-    if not isinstance(J, (ufl.Form, slate.TensorBase)):
-        raise TypeError(
-            f"Provided Jacobian is a '{type(J).__name__}', not a Form or Slate Tensor"
-        )
+    if not isinstance(J, (ufl.BaseForm, slate.TensorBase)):
+        raise TypeError("Provided Jacobian is a '%s', not a BaseForm or Slate Tensor" % type(J).__name__)
     if len(J.arguments()) != 2:
         raise ValueError("Provided Jacobian is not a bilinear form")
-    if Jp is not None and not isinstance(Jp, (ufl.Form, slate.TensorBase)):
-        raise TypeError(
-            f"Provided preconditioner is a '{type(Jp).__name__}', not a Form or Slate Tensor"
-        )
+    if Jp is not None and not isinstance(Jp, (ufl.BaseForm, slate.TensorBase)):
+        raise TypeError("Provided preconditioner is a '%s', not a BaseForm or Slate Tensor" % type(Jp).__name__)
     if Jp is not None and len(Jp.arguments()) != 2:
         raise ValueError("Provided preconditioner is not a bilinear form")
 
 
 def is_form_consistent(is_linear, bcs):
     # Check form style consistency
-    if not (
-        is_linear == all(bc.is_linear for bc in bcs if not isinstance(bc, DirichletBC))
-        or not is_linear
-        == all(not bc.is_linear for bc in bcs if not isinstance(bc, DirichletBC))
-    ):
-        raise TypeError(
-            "Form style mismatch: some forms are given in 'F == 0' style, but others are given in 'A == b' style."
-        )
+    if not (is_linear == all(bc.is_linear for bc in bcs if not isinstance(bc, DirichletBC))
+            or not is_linear == all(not bc.is_linear for bc in bcs if not isinstance(bc, DirichletBC))):
+        raise TypeError("Form style mismatch: some forms are given in 'F == 0' style, but others are given in 'A == b' style.")
 
 
 class DAEProblem(object):
@@ -119,9 +104,7 @@ class DAEProblem(object):
 
         # Use the user-provided Jacobian. If none is provided, derive
         # the Jacobian from the residual.
-        self.J = J or self.shift * ufl_expr.derivative(F, udot) + ufl_expr.derivative(
-            F, u
-        )
+        self.J = self.shift * ufl_expr.derivative(F, udot) + (J or ufl_expr.derivative(F, u))
 
         # Derive the Jacobian for the G residual
         self.dGdu = ufl_expr.derivative(G, u) if G is not None else None
@@ -252,8 +235,8 @@ class DAESolver(OptionsManager):
 
         self._ctx = ctx
         self._work = problem.u.dof_dset.layout_vec.duplicate()
-        self.ts.setDM(problem.dm)
 
+        self.ts.setDM(problem.dm)
         self.ts.setMonitor(monitor_callback)
 
         self.ts.setTime(problem.tspan[0])
@@ -269,7 +252,7 @@ class DAESolver(OptionsManager):
 
         self.set_default_parameter("ts_exact_final_time", "stepover")
         # allow a certain number of failures (step will be rejected and retried)
-        self.set_default_parameter("ts_max_snes_failures", 5)
+        #self.set_default_parameter("ts_max_snes_failures", 5)
 
         self._set_problem_eval_funcs(
             ctx, problem, nullspace, nullspace_T, near_nullspace
@@ -369,11 +352,11 @@ class DAESolver(OptionsManager):
                 # Ensure options database has full set of options (so monitors
                 # work right)
                 for ctx in chain(
-                    (
-                        self.inserted_options(),
-                        dmhooks.add_hooks(dm, self, appctx=self._ctx),
-                    ),
-                    self._transfer_operators,
+                        (
+                            self.inserted_options(),
+                            dmhooks.add_hooks(dm, self, appctx=self._ctx),
+                        ),
+                        self._transfer_operators,
                 ):
                     stack.enter_context(ctx)
                 self.ts.solve(work)

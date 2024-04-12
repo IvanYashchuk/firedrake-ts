@@ -1,18 +1,23 @@
+from itertools import chain
+
 import numpy
 
-import functools
-import itertools
-
 from pyop2 import op2
-from firedrake import assemble, dmhooks, function, ufl_expr
+from firedrake_configuration import get_config
+from firedrake import function, cofunction, dmhooks
 from firedrake.exceptions import ConvergenceError
 from firedrake.petsc import PETSc
 from firedrake.formmanipulation import ExtractSubBlock
-from firedrake.solving_utils import _make_reasons
 from firedrake.utils import cached_property
+from firedrake.logging import warning
+from firedrake.assemble import get_assembler
+
+
+from firedrake.solving_utils import _make_reasons, _SNESContext
 
 
 TSReasons = _make_reasons(PETSc.TS.ConvergedReason())
+
 
 
 def check_ts_convergence(ts):
@@ -35,7 +40,7 @@ def check_ts_convergence(ts):
         )
 
 
-class _TSContext(object):
+class _TSContext(_SNESContext):
     r"""
     Context holding information for TS callbacks.
 
@@ -51,10 +56,10 @@ class _TSContext(object):
         ``"state"``.
     :arg pre_jacobian_callback: User-defined function called immediately
         before Jacobian assembly
-    :arg pre_function_callback: User-defined function called immediately
-        before residual assembly
     :arg post_jacobian_callback: User-defined function called immediately
         after Jacobian assembly
+    :arg pre_function_callback: User-defined function called immediately
+        before residual assembly
     :arg post_function_callback: User-defined function called immediately
         after residual assembly
     :arg options_prefix: The options prefix of the TS.
@@ -69,42 +74,21 @@ class _TSContext(object):
     get the context (which is one of these objects) to find the
     Firedrake level information.
     """
+    @PETSc.Log.EventDecorator()
+    def __init__(self, problem, mat_type, pmat_type, appctx=None,
+                 pre_jacobian_callback=None, pre_function_callback=None,
+                 post_jacobian_callback=None, post_function_callback=None,
+                 options_prefix=None,
+                 transfer_manager=None,
+                 project_rhs=True,
+                 rhs_projection_parameters=None):
 
-    def __init__(
-        self,
-        problem,
-        mat_type,
-        pmat_type,
-        appctx=None,
-        pre_jacobian_callback=None,
-        pre_function_callback=None,
-        post_jacobian_callback=None,
-        post_function_callback=None,
-        options_prefix=None,
-        project_rhs=True,
-        rhs_projection_parameters=None,
-        transfer_manager=None,
-    ):
-        from firedrake.bcs import DirichletBC
+        super().__init__(problem, mat_type, pmat_type, appctx,
+                 pre_jacobian_callback, pre_function_callback,
+                 post_jacobian_callback, post_function_callback,
+                 options_prefix,
+                 transfer_manager)
 
-        if pmat_type is None:
-            pmat_type = mat_type
-        self.mat_type = mat_type
-        self.pmat_type = pmat_type
-        self.options_prefix = options_prefix
-
-        matfree = mat_type == "matfree"
-        pmatfree = pmat_type == "matfree"
-
-        self._problem = problem
-        self._pre_jacobian_callback = pre_jacobian_callback
-        self._pre_function_callback = pre_function_callback
-        self._post_jacobian_callback = post_jacobian_callback
-        self._post_function_callback = post_function_callback
-
-        self.fcp = problem.form_compiler_parameters
-        # Function to hold current guess
-        self._x = problem.u
         # Function to hold time derivative
         self._xdot = problem.udot
         # Constant to hold time shift value
@@ -112,135 +96,27 @@ class _TSContext(object):
         # Constant to hold current time value
         self._time = problem.time
 
-        if appctx is None:
-            appctx = {}
-        # A split context will already get the full state.
-        # TODO, a better way of doing this.
-        # Now we don't have a temporary state inside the snes
-        # context we could just require the user to pass in the
-        # full state on the outside.
-        appctx.setdefault("state", self._x)
-        appctx.setdefault("form_compiler_parameters", self.fcp)
-
-        self.appctx = appctx
-        self.matfree = matfree
-        self.pmatfree = pmatfree
-        self.F = problem.F
-        self.J = problem.J
         self.G = problem.G
         self.dGdu = problem.dGdu
 
-        # For Jp to equal J, bc.Jp must equal bc.J for all EquationBC objects.
-        Jp_eq_J = problem.Jp is None and all(bc.Jp_eq_J for bc in problem.bcs)
-
-        if mat_type != pmat_type or not Jp_eq_J:
-            # Need separate pmat if either Jp is different or we want
-            # a different pmat type to the mat type.
-            if problem.Jp is None:
-                self.Jp = self.J
-            else:
-                self.Jp = problem.Jp
-        else:
-            # pmat_type == mat_type and Jp_eq_J
-            self.Jp = None
-
-        self.bcs_F = [
-            bc if isinstance(bc, DirichletBC) else bc._F for bc in problem.bcs
-        ]
-        self.bcs_G = [
-            bc if isinstance(bc, DirichletBC) else bc._G for bc in problem.bcs
-        ]
-        self.bcs_dGdu = [
-            bc if isinstance(bc, DirichletBC) else bc._dGdu for bc in problem.bcs
-        ]
-        self.bcs_J = [
-            bc if isinstance(bc, DirichletBC) else bc._J for bc in problem.bcs
-        ]
-        self.bcs_Jp = [
-            bc if isinstance(bc, DirichletBC) else bc._Jp for bc in problem.bcs
-        ]
-        self._assemble_residual = functools.partial(
-            assemble,
-            self.F,
-            tensor=self._F,
-            bcs=self.bcs_F,
-            form_compiler_parameters=self.fcp
-        )
+        self.bcs_G = tuple(bc.extract_form('F') for bc in problem.bcs)
+        self.bcs_dGdu = tuple(bc.extract_form('J') for bc in problem.bcs)
 
         if self.G is not None:
-            self._assemble_rhs_residual = functools.partial(
-                assemble,
-                self.G,
-                tensor=self._G,
-                bcs=self.bcs_G,
-                form_compiler_parameters=self.fcp
-            )
+            self._assemble_rhs_residual = get_assembler(self.G, bcs=self.bcs_G,
+                                                        form_compiler_parameters=self.fcp,
+                                                        zero_bc_nodes=True).assemble
             self.rhs_projection_parameters = rhs_projection_parameters
             self.project_rhs = project_rhs
             self._G_or_projected_G = self._projected_G if self.project_rhs else self._G
             self._rhs_jacobian_assembled = False
 
-        self._jacobian_assembled = False
-        self._splits = {}
-        self._coarse = None
-        self._fine = None
 
-        self._nullspace = None
-        self._nullspace_T = None
-        self._near_nullspace = None
-        self._transfer_manager = transfer_manager
-
-    @property
-    def transfer_manager(self):
-        """This allows the transfer manager to be set from options, e.g.
-
-        solver_parameters = {"ksp_type": "cg",
-                             "pc_type": "mg",
-                             "mg_transfer_manager": __name__ + ".manager"}
-
-        The value for "mg_transfer_manager" can either be a specific instantiated
-        object, or a function or class name. In the latter case it will be invoked
-        with no arguments to instantiate the object.
-
-        If "snes_type": "fas" is used, the relevant option is "fas_transfer_manager",
-        with the same semantics.
-        """
-        if self._transfer_manager is None:
-            opts = PETSc.Options()
-            prefix = self.options_prefix or ""
-            if opts.hasName(prefix + "mg_transfer_manager"):
-                managername = opts[prefix + "mg_transfer_manager"]
-            elif opts.hasName(prefix + "fas_transfer_manager"):
-                managername = opts[prefix + "fas_transfer_manager"]
-            else:
-                managername = None
-
-            if managername is None:
-                from firedrake import TransferManager
-
-                transfer = TransferManager(use_averaging=True)
-            else:
-                (modname, objname) = managername.rsplit(".", 1)
-                mod = __import__(modname)
-                obj = getattr(mod, objname)
-                if isinstance(obj, type):
-                    transfer = obj()
-                else:
-                    transfer = obj
-
-            self._transfer_manager = transfer
-        return self._transfer_manager
-
-    @transfer_manager.setter
-    def transfer_manager(self, manager):
-        if self._transfer_manager is not None:
-            raise ValueError("Must set transfer manager before first use.")
-        self._transfer_manager = manager
 
     def set_ifunction(self, ts):
         r"""Set the function to compute F(t,U,U_t) where F() = 0 is the DAE to be solved."""
         with self._F.dat.vec_wo as v:
-            ts.setIFunction(self.form_function, f=v)
+            ts.setIFunction(self.form_function, v)
 
     def set_ijacobian(self, ts):
         r"""Set the function to compute the matrix dF/dU + a*dF/dU_t where F(t,U,U_t) is the function provided with set_ifunction()"""
@@ -250,16 +126,12 @@ class _TSContext(object):
         r"""Set the function to compute G(t,u) where F() = G() is the equation to be solved."""
         if self.G is not None:
             with self._G_or_projected_G.dat.vec_wo as v:
-                ts.setRHSFunction(self.form_rhs_function, f=v)
+                ts.setRHSFunction(self.form_rhs_function, v)
 
     def set_rhs_jacobian(self, ts):
         r"""Set the function to compute the Jacobian of G, where U_t = G(U,t), as well as the location to store the matrix."""
         if self.G is not None:
-            ts.setRHSJacobian(
-                self.form_rhs_jacobian,
-                J=self._rhs_jac.petscmat,
-                P=self._rhs_pjac.petscmat,
-            )
+            ts.setRHSJacobian(self.form_rhs_jacobian, J=self._rhs_jac.petscmat, P=self._rhs_pjac.petscmat)
 
     def set_nullspace(self, nullspace, ises=None, transpose=False, near=False):
         if nullspace is None:
@@ -270,11 +142,11 @@ class _TSContext(object):
         if ises is not None:
             nullspace._apply(ises, transpose=transpose, near=near)
 
+    @PETSc.Log.EventDecorator()
     def split(self, fields):
         from firedrake import replace, as_vector, split
-        from firedrake_ts.ts_solver import DAEProblem
+        from firedrake_ts.ts_solver import DAEProblem as DAEP
         from firedrake.bcs import DirichletBC, EquationBC
-
         fields = tuple(tuple(f) for f in fields)
         splits = self._splits.get(tuple(fields))
         if splits is not None:
@@ -284,9 +156,9 @@ class _TSContext(object):
         problem = self._problem
         splitter = ExtractSubBlock()
         for field in fields:
-            F = splitter.split(problem.F, argument_indices=(field,))
+            F = splitter.split(problem.F, argument_indices=(field, ))
             J = splitter.split(problem.J, argument_indices=(field, field))
-            us = problem.u.split()
+            us = problem.u.subfunctions
             V = F.arguments()[0].function_space()
             # Exposition:
             # We are going to make a new solution Function on the sub
@@ -297,9 +169,9 @@ class _TSContext(object):
             # subspace that shares data.
             pieces = [us[i].dat for i in field]
             if len(pieces) == 1:
-                (val,) = pieces
+                val, = pieces
                 subu = function.Function(V, val=val)
-                subsplit = (subu,)
+                subsplit = (subu, )
             else:
                 val = op2.MixedDat(pieces)
                 subu = function.Function(V, val=val)
@@ -345,38 +217,20 @@ class _TSContext(object):
             bcs = []
             for bc in problem.bcs:
                 if isinstance(bc, DirichletBC):
-                    bc_temp = bc.reconstruct(
-                        field=field,
-                        V=V,
-                        g=bc.function_arg,
-                        sub_domain=bc.sub_domain,
-                        method=bc.method,
-                    )
+                    bc_temp = bc.reconstruct(field=field, V=V, g=bc.function_arg, sub_domain=bc.sub_domain)
                 elif isinstance(bc, EquationBC):
                     bc_temp = bc.reconstruct(field, V, subu, u)
                 if bc_temp is not None:
                     bcs.append(bc_temp)
-            new_problem = DAEProblem(
-                F,
-                subu,
-                problem.udot,
-                problem.tspan,
-                bcs=bcs,
-                J=J,
-                Jp=Jp,
-                form_compiler_parameters=problem.form_compiler_parameters,
-                G=G,
-            )
+            new_problem = DAEP(F, subu,
+            		       problem.udot, problem.tspan,
+                	       bcs=bcs, J=J, Jp=Jp,
+                               form_compiler_parameters=problem.form_compiler_parameters,
+                               G=G, time=problem.time)
             new_problem._constant_jacobian = problem._constant_jacobian
-            splits.append(
-                type(self)(
-                    new_problem,
-                    mat_type=self.mat_type,
-                    pmat_type=self.pmat_type,
-                    appctx=self.appctx,
-                    transfer_manager=self.transfer_manager,
-                )
-            )
+            splits.append(type(self)(new_problem, mat_type=self.mat_type, pmat_type=self.pmat_type,
+                                     appctx=self.appctx,
+                                     transfer_manager=self.transfer_manager))
         return self._splits.setdefault(tuple(fields), splits)
 
     @staticmethod
@@ -402,7 +256,7 @@ class _TSContext(object):
         if ctx._pre_function_callback is not None:
             ctx._pre_function_callback(X, Xdot)
 
-        ctx._assemble_residual()
+        ctx._assemble_residual(tensor=ctx._F)
 
         if ctx._post_function_callback is not None:
             with ctx._F.dat.vec as F_:
@@ -442,20 +296,21 @@ class _TSContext(object):
             X.copy(v)
         with ctx._xdot.dat.vec_wo as v:
             Xdot.copy(v)
+
         ctx._time.assign(t)
 
         if ctx._pre_jacobian_callback is not None:
             ctx._pre_jacobian_callback(X, Xdot)
 
         ctx._shift.assign(shift)
-        ctx._assemble_jac()
+        ctx._assemble_jac(ctx._jac)
 
         if ctx._post_jacobian_callback is not None:
             ctx._post_jacobian_callback(X, Xdot, J)
 
         if ctx.Jp is not None:
             assert P.handle == ctx._pjac.petscmat.handle
-            ctx._assemble_pjac()
+            ctx._assemble_pjac(ctx._pjac)
 
         ises = problem.J.arguments()[0].function_space()._ises
         ctx.set_nullspace(ctx._nullspace, ises, transpose=False, near=False)
@@ -520,7 +375,7 @@ class _TSContext(object):
 
         # TODO: Add pre_rhs_jacobian_callback
 
-        ctx._assemble_rhs_jac()
+        ctx._assemble_rhs_jac(ctx._dGdu)
 
         # TODO: Add post_rhs_jacobian_callback
 
@@ -538,7 +393,6 @@ class _TSContext(object):
         :arg P: the preconditioner matrix (a Mat)
         """
         from firedrake.bcs import DirichletBC
-
         dm = ksp.getDM()
         ctx = dmhooks.get_appctx(dm)
         problem = ctx._problem
@@ -552,81 +406,21 @@ class _TSContext(object):
 
         fine = ctx._fine
         if fine is not None:
-            manager = dmhooks.get_transfer_operators(fine._x.function_space().dm)
+            manager = dmhooks.get_transfer_manager(fine._x.function_space().dm)
             manager.inject(fine._x, ctx._x)
 
-            for bc in itertools.chain(*ctx._problem.bcs):
+            for bc in chain(*ctx._problem.bcs):
                 if isinstance(bc, DirichletBC):
                     bc.apply(ctx._x)
 
-        ctx._assemble_jac()
-
+        ctx._assemble_jac(ctx._jac)
         if ctx.Jp is not None:
             assert P.handle == ctx._pjac.petscmat.handle
-            ctx._assemble_pjac()
-
-    @cached_property
-    def _jac(self):
-        from firedrake.assemble import allocate_matrix
-
-        return allocate_matrix(
-            self.J,
-            bcs=self.bcs_J,
-            form_compiler_parameters=self.fcp,
-            mat_type=self.mat_type,
-            appctx=self.appctx,
-            options_prefix=self.options_prefix,
-        )
-
-    @cached_property
-    def _assemble_jac(self):
-        return functools.partial(
-            assemble,
-            self.J,
-            tensor=self._jac,
-            bcs=self.bcs_J,
-            form_compiler_parameters=self.fcp,
-            mat_type=self.mat_type
-        )
-
-    @cached_property
-    def is_mixed(self):
-        return self._jac.block_shape != (1, 1)
-
-    @cached_property
-    def _pjac(self):
-        if self.mat_type != self.pmat_type or self._problem.Jp is not None:
-            from firedrake.assemble import allocate_matrix
-
-            return allocate_matrix(
-                self.Jp,
-                bcs=self.bcs_Jp,
-                form_compiler_parameters=self.fcp,
-                mat_type=self.pmat_type,
-                appctx=self.appctx,
-                options_prefix=self.options_prefix,
-            )
-        else:
-            return self._jac
-
-    @cached_property
-    def _assemble_pjac(self):
-        return functools.partial(
-            assemble,
-            self.Jp,
-            tensor=self._pjac,
-            bcs=self.bcs_Jp,
-            form_compiler_parameters=self.fcp,
-            mat_type=self.pmat_type
-        )
-
-    @cached_property
-    def _F(self):
-        return function.Function(self.F.arguments()[0].function_space())
+            ctx._assemble_pjac(ctx._pjac)
 
     @cached_property
     def _G(self):
-        return function.Function(self.G.arguments()[0].function_space())
+        return cofunction.Cofunction(self.G.arguments()[0].function_space().dual())
 
     @cached_property
     def _projected_G(self):
@@ -635,10 +429,10 @@ class _TSContext(object):
     @cached_property
     def _rhs_projection_solver(self):
         if self.G is not None:
-            from firedrake import LinearSolver
+            from firedrake import LinearSolver, assemble, ufl_expr
 
             mass_matrix = assemble(
-                ufl_expr.derivative(self.F, self._xdot), bcs=self.bcs_G
+                ufl_expr.derivative(self.F, self._xdot), bcs=self.bcs_F
             )
 
             prefix = self.options_prefix or ""
@@ -658,24 +452,17 @@ class _TSContext(object):
         solve(mass_matrix_form == self.G, self._projected_G, self.bcs_G)
         """
         if self.G is not None:
-            self._assemble_rhs_residual()
+            self._assemble_rhs_residual(self._G)
             if self.project_rhs:
+                # TODO maybe the riesz_repre is the correct way?
+                #assign(self._projected_G, self._G.riesz_representation())
                 self._rhs_projection_solver.solve(self._projected_G, self._G)
             # else assembled rhs residual that is saved in self._G is used
 
     @cached_property
     def _rhs_jac(self):
         if self.G is not None:
-            from firedrake.assemble import allocate_matrix
-
-            return allocate_matrix(
-                self.dGdu,
-                bcs=self.bcs_dGdu,
-                form_compiler_parameters=self.fcp,
-                mat_type=self.mat_type,
-                appctx=self.appctx,
-                options_prefix=self.options_prefix,
-            )
+	        return self._assembler_rhs_jac.allocate()
         else:
             return None
 
@@ -686,17 +473,14 @@ class _TSContext(object):
     @cached_property
     def _assemble_rhs_jac(self):
         if self.G is not None:
-            return functools.partial(
-                assemble,
-                self.dGdu,
-                tensor=self._rhs_jac,
-                bcs=self.bcs_dGdu,
-                form_compiler_parameters=self.fcp,
-                mat_type=self.mat_type
-            )
+	        return self._assembler_rhs_jac.assemble
         else:
             return None
 
     @cached_property
     def _assemble_rhs_pjac(self):
         return self._assemble_rhs_jac
+
+    @cached_property
+    def _assembler_rhs_jac(self):
+        return get_assembler(self.dGdu, bcs=self.bcs_dGdu, form_compiler_parameters=self.fcp, mat_type=self.mat_type, options_prefix=self.options_prefix, appctx=self.appctx)
