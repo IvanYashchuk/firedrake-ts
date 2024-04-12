@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: docker://firedrakeproject/firedrake-vanilla:latest
+      options: --user root
 
     steps:
       - uses: actions/checkout@v4
