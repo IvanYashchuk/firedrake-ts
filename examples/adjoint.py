@@ -14,7 +14,8 @@ V = fd.VectorFunctionSpace(mesh, "CG", 2)
 
 x = ufl.SpatialCoordinate(mesh)
 expr = ufl.as_vector([ufl.sin(2 * ufl.pi * x[0]), ufl.cos(2 * ufl.pi * x[1])])
-u = fd.interpolate(expr, V)
+u = fd.Function(V)
+u.interpolate(expr)
 
 u_dot = fd.Function(V)
 v = fd.TestFunction(V)

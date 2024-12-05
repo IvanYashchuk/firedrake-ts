@@ -228,6 +228,7 @@ class DAESolver(OptionsManager):
             # Mixed problem, use jacobi pc if user has not supplied
             # one.
             self.set_default_parameter("pc_type", "jacobi")
+        self.set_default_parameter("ts_max_snes_failures", -1)
 
         self.ts = PETSc.TS().create(comm=problem.dm.comm)
         self.snes = self.ts.getSNES()
