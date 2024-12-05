@@ -83,6 +83,7 @@ class DAEProblem(object):
 
         self.u = u
         self.udot = udot
+        self.u_restrict = udot
         self.tspan = tspan
         self.F = F
         self.G = G
