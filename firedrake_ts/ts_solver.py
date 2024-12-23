@@ -81,16 +81,17 @@ class DAEProblem(object):
         is_form_consistent(self.is_linear, self.bcs)
         self.Jp_eq_J = Jp is None
 
-        self.u = u
+        self.u_restrict = u
         self.udot = udot
-        self.u_restrict = udot
         self.tspan = tspan
         self.F = F
         self.G = G
         self.Jp = Jp
-        if not isinstance(self.u, function.Function):
+        self.restrict = False
+
+        if not isinstance(self.u_restrict, function.Function):
             raise TypeError(
-                "Provided solution is a '%s', not a Function" % type(self.u).__name__
+                "Provided solution is a '%s', not a Function" % type(self.u_restrict).__name__
             )
         if not isinstance(self.udot, function.Function):
             raise TypeError(
@@ -124,7 +125,7 @@ class DAEProblem(object):
 
     @utils.cached_property
     def dm(self):
-        return self.u.function_space().dm
+        return self.u_restrict.function_space().dm
 
 
 class DAESolver(OptionsManager):
@@ -236,7 +237,7 @@ class DAESolver(OptionsManager):
         self._problem = problem
 
         self._ctx = ctx
-        self._work = problem.u.dof_dset.layout_vec.duplicate()
+        self._work = problem.u_restrict.dof_dset.layout_vec.duplicate()
 
         self.ts.setDM(problem.dm)
         self.ts.setMonitor(monitor_callback)
@@ -340,7 +341,7 @@ class DAESolver(OptionsManager):
         # Make sure appcontext is attached to the DM before we solve.
         dm = self.ts.getDM()
         for dbc in self._problem.dirichlet_bcs():
-            dbc.apply(self._problem.u)
+            dbc.apply(self._problem.u_restrict)
 
         if bounds is not None:
             lower, upper = bounds
@@ -348,7 +349,7 @@ class DAESolver(OptionsManager):
                 self.snes.setVariableBounds(lb, ub)
 
         work = self._work
-        with self._problem.u.dat.vec as u:
+        with self._problem.u_restrict.dat.vec as u:
             u.copy(work)
             with ExitStack() as stack:
                 # Ensure options database has full set of options (so monitors
