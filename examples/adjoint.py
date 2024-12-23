@@ -36,7 +36,7 @@ t = 0.0
 end = 0.1
 tspan = (t, end)
 
-state_out = fd.File("result/state.pvd")
+state_out = fd.output.VTKFile("result/state.pvd")
 
 
 def ts_monitor(ts, steps, time, X):
@@ -82,5 +82,5 @@ fdJdu=dJdu.riesz_representation()
 print(f"Norm of dJdu after the adjoint solve: {dJdu_vec.norm()=} {fd.norm(fdJdu)=}")
 
 
-adj_out = fd.File("result/adj.pvd")
+adj_out = fd.output.VTKFile("result/adj.pvd")
 adj_out.write(fdJdu, time=0)
