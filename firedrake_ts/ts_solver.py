@@ -87,7 +87,6 @@ class DAEProblem(object):
         self.F = F
         self.G = G
         self.Jp = Jp
-        self.restrict = False
 
         if not isinstance(self.u_restrict, function.Function):
             raise TypeError(
