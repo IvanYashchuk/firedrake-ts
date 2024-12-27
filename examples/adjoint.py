@@ -14,7 +14,8 @@ V = fd.VectorFunctionSpace(mesh, "CG", 2)
 
 x = ufl.SpatialCoordinate(mesh)
 expr = ufl.as_vector([ufl.sin(2 * ufl.pi * x[0]), ufl.cos(2 * ufl.pi * x[1])])
-u = fd.interpolate(expr, V)
+u = fd.Function(V)
+u.interpolate(expr)
 
 u_dot = fd.Function(V)
 v = fd.TestFunction(V)
@@ -35,7 +36,7 @@ t = 0.0
 end = 0.1
 tspan = (t, end)
 
-state_out = fd.File("result/state.pvd")
+state_out = fd.output.VTKFile("result/state.pvd")
 
 
 def ts_monitor(ts, steps, time, X):
@@ -81,5 +82,5 @@ fdJdu=dJdu.riesz_representation()
 print(f"Norm of dJdu after the adjoint solve: {dJdu_vec.norm()=} {fd.norm(fdJdu)=}")
 
 
-adj_out = fd.File("result/adj.pvd")
+adj_out = fd.output.VTKFile("result/adj.pvd")
 adj_out.write(fdJdu, time=0)
